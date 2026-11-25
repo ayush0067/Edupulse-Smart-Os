@@ -7,12 +7,33 @@ let autoCheckInCooldown = false;
 let liveSyncChannel = null;
 let cloudEventSource = null;
 
-// Official KIPM College of Engineering & Technology, Plot BL 1&2, Sector 9, GIDA
+// Official KIPM College of Engineering & Technology, Sector 9, GIDA, Gorakhpur
 const KIPM_CAMPUS = {
   name: 'KIPM College of Engineering & Technology, Sector 9, GIDA',
   lat: 26.741022,
   lng: 83.270194,
   radiusMeters: 300
+};
+
+// College Timetable: 9:30 AM - 4:20 PM | 7 x 50-Minute Periods | Lunch 12:50 PM - 1:50 PM Locked
+const COLLEGE_SCHEDULE = [
+  { id: 'P1', label: 'Period 1', startMin: 9 * 60 + 30,  endMin: 10 * 60 + 20, timeText: '09:30 – 10:20 AM', subjectIdx: 0 },
+  { id: 'P2', label: 'Period 2', startMin: 10 * 60 + 20, endMin: 11 * 60 + 10, timeText: '10:20 – 11:10 AM', subjectIdx: 1 },
+  { id: 'P3', label: 'Period 3', startMin: 11 * 60 + 10, endMin: 12 * 60 + 0,  timeText: '11:10 – 12:00 PM', subjectIdx: 2 },
+  { id: 'P4', label: 'Period 4', startMin: 12 * 60 + 0,  endMin: 12 * 60 + 50, timeText: '12:00 – 12:50 PM', subjectIdx: 3 },
+  { id: 'P5', label: 'Period 5', startMin: 13 * 60 + 50, endMin: 14 * 60 + 40, timeText: '01:50 – 02:40 PM', subjectIdx: 4 },
+  { id: 'P6', label: 'Period 6', startMin: 14 * 60 + 40, endMin: 15 * 60 + 30, timeText: '02:40 – 03:30 PM', subjectIdx: 5 },
+  { id: 'P7', label: 'Period 7', startMin: 15 * 60 + 30, endMin: 16 * 60 + 20, timeText: '03:30 – 04:20 PM', subjectIdx: 6 }
+];
+const LUNCH_WINDOW = { startMin: 12 * 60 + 50, endMin: 13 * 60 + 50 };
+
+const collegeScheduleState = {
+  allowed: false,
+  isLunch: false,
+  activePeriod: null,
+  minsLeft: 0,
+  statusText: 'Checking college hours...',
+  lastAutoSelectedPeriodId: null
 };
 
 const campusGeoState = {
@@ -37,6 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyUrlCloudParams();
   await checkPythonBackend();
   await initRealTimeDatabaseSync();
+  initCollegeScheduleLock();
   initKipmCampusGeofence();
   upgradeAdvancedFaceSystem();
   injectQuestionCameraScanner();
@@ -47,7 +69,119 @@ document.addEventListener('DOMContentLoaded', async () => {
   await refreshPredictiveAnalytics();
 });
 
-// ================= 0. KIPM CAMPUS HAVERSINE GPS GEOFENCE ENGINE =================
+// ================= 0A. COLLEGE TIMETABLE ENGINE (9:30 AM - 4:20 PM | 50-MIN PERIODS) =================
+function evaluateCollegeSchedule() {
+  const now = new Date();
+  const totalMins = now.getHours() * 60 + now.getMinutes();
+
+  if (totalMins >= LUNCH_WINDOW.startMin && totalMins < LUNCH_WINDOW.endMin) {
+    const left = LUNCH_WINDOW.endMin - totalMins;
+    collegeScheduleState.allowed = false;
+    collegeScheduleState.isLunch = true;
+    collegeScheduleState.activePeriod = null;
+    collegeScheduleState.minsLeft = left;
+    collegeScheduleState.statusText = `🍽️ Lunch Break (12:50 – 1:50 PM) • Resumes in ${left}m`;
+    return;
+  }
+
+  const period = COLLEGE_SCHEDULE.find(p => totalMins >= p.startMin && totalMins < p.endMin);
+  if (period) {
+    const left = period.endMin - totalMins;
+    collegeScheduleState.allowed = true;
+    collegeScheduleState.isLunch = false;
+    collegeScheduleState.activePeriod = period;
+    collegeScheduleState.minsLeft = left;
+    collegeScheduleState.statusText = `🕒 ${period.label} Active (${period.timeText}) • ${left}m left`;
+
+    // Auto-select the current 50-min period's subject when entering a new period
+    const sSel = document.getElementById('live-subject-select');
+    if (sSel && collegeScheduleState.lastAutoSelectedPeriodId !== period.id) {
+      const opt = sSel.querySelector(`option[value="${period.subjectIdx}"]`);
+      if (opt && !opt.disabled) {
+        sSel.value = String(period.subjectIdx);
+        collegeScheduleState.lastAutoSelectedPeriodId = period.id;
+      }
+    }
+    return;
+  }
+
+  collegeScheduleState.allowed = false;
+  collegeScheduleState.isLunch = false;
+  collegeScheduleState.activePeriod = null;
+  collegeScheduleState.minsLeft = 0;
+  collegeScheduleState.statusText = totalMins < 9 * 60 + 30
+    ? '🔒 Before College Hours • Opens at 9:30 AM (Period 1)'
+    : '🔒 After College Hours (Closed 4:20 PM) • Opens 9:30 AM';
+}
+
+function initCollegeScheduleLock() {
+  injectScheduleHUD();
+  evaluateCollegeSchedule();
+  updateScheduleUI();
+
+  setInterval(() => {
+    evaluateCollegeSchedule();
+    updateScheduleUI();
+    syncVerifyButtonState();
+  }, 1000);
+}
+
+function injectScheduleHUD() {
+  const liveCard = document.querySelector('#view-live .live-grid > div:first-child');
+  if (liveCard && !document.getElementById('college-schedule-hud')) {
+    const hud = document.createElement('div');
+    hud.id = 'college-schedule-hud';
+    hud.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:10px;background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.3);font-size:0.8rem;';
+    hud.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong id="schedule-status-text" style="color:var(--cyan);">Checking College Timetable...</strong>
+        <span style="font-size:0.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">9:30 AM–4:20 PM • 50m/Period • Lunch 12:50–1:50 PM</span>
+      </div>
+      <div id="schedule-period-pills" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;"></div>
+    `;
+    liveCard.appendChild(hud);
+  }
+
+  const attToolbar = document.querySelector('#view-attendance .section-toolbar');
+  if (attToolbar && !document.getElementById('att-schedule-pill')) {
+    const pill = document.createElement('span');
+    pill.id = 'att-schedule-pill';
+    pill.className = 'badge badge-cyan';
+    pill.textContent = '🕒 Checking College Hours...';
+    attToolbar.appendChild(pill);
+  }
+}
+
+function updateScheduleUI() {
+  const hud = document.getElementById('college-schedule-hud');
+  const txt = document.getElementById('schedule-status-text');
+  const pillsWrap = document.getElementById('schedule-period-pills');
+  const attPill = document.getElementById('att-schedule-pill');
+
+  if (collegeScheduleState.allowed) {
+    if (hud) { hud.style.background = 'rgba(16,185,129,0.1)'; hud.style.borderColor = 'rgba(16,185,129,0.38)'; }
+    if (txt) { txt.style.color = 'var(--green)'; txt.textContent = collegeScheduleState.statusText; }
+    if (attPill) { attPill.className = 'badge badge-green'; attPill.textContent = collegeScheduleState.statusText; }
+  } else {
+    if (hud) { hud.style.background = 'rgba(244,63,94,0.1)'; hud.style.borderColor = 'rgba(244,63,94,0.38)'; }
+    if (txt) { txt.style.color = 'var(--red)'; txt.textContent = collegeScheduleState.statusText; }
+    if (attPill) { attPill.className = 'badge badge-red'; attPill.textContent = collegeScheduleState.statusText; }
+  }
+
+  if (pillsWrap) {
+    const activeId = collegeScheduleState.activePeriod?.id;
+    const p1to4 = COLLEGE_SCHEDULE.slice(0, 4).map(p =>
+      `<span class="badge ${p.id === activeId ? 'badge-green' : ''}" style="font-size:0.68rem;padding:3px 7px;${p.id === activeId ? '' : 'background:rgba(255,255,255,0.04);color:var(--text-muted);'}" title="${p.timeText}">${p.id}: ${p.timeText.split(' ')[0]}</span>`
+    ).join('');
+    const lunchChip = `<span class="badge ${collegeScheduleState.isLunch ? 'badge-red' : 'badge-amber'}" style="font-size:0.68rem;padding:3px 7px;">🍽️ Lunch 12:50–1:50</span>`;
+    const p5to7 = COLLEGE_SCHEDULE.slice(4).map(p =>
+      `<span class="badge ${p.id === activeId ? 'badge-green' : ''}" style="font-size:0.68rem;padding:3px 7px;${p.id === activeId ? '' : 'background:rgba(255,255,255,0.04);color:var(--text-muted);'}" title="${p.timeText}">${p.id}: ${p.timeText.split(' ')[0]}</span>`
+    ).join('');
+    pillsWrap.innerHTML = p1to4 + lunchChip + p5to7;
+  }
+}
+
+// ================= 0B. KIPM CAMPUS HAVERSINE GPS GEOFENCE ENGINE =================
 function haversineMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = d => (d * Math.PI) / 180;
@@ -145,13 +279,12 @@ function updateGeofenceUI() {
     if (attPill) { attPill.className = 'badge badge-red'; attPill.textContent = '🚫 GPS Required (KIPM GIDA)'; }
     return;
   }
-
   if (!campusGeoState.ready) return;
 
   const distTxt = formatDistanceLabel(campusGeoState.distanceMeters);
   if (campusGeoState.insideCampus) {
     if (hud) { hud.style.background = 'rgba(16,185,129,0.12)'; hud.style.borderColor = 'rgba(16,185,129,0.4)'; }
-    if (statusEl) { statusEl.style.color = 'var(--green)'; statusEl.textContent = `📍 INSIDE KIPM CAMPUS (${distTxt} from building • Attendance Unlocked ✓)`; }
+    if (statusEl) { statusEl.style.color = 'var(--green)'; statusEl.textContent = `📍 INSIDE KIPM CAMPUS (${distTxt} from building • Unlocked ✓)`; }
     if (attPill) { attPill.className = 'badge badge-green'; attPill.textContent = `📍 At KIPM Campus (${distTxt})`; }
   } else {
     if (hud) { hud.style.background = 'rgba(244,63,94,0.12)'; hud.style.borderColor = 'rgba(244,63,94,0.4)'; }
@@ -174,18 +307,28 @@ function syncVerifyButtonState() {
     return;
   }
 
+  // Gate 1: Strict College Hours & Lunch Break Lock
+  if (!collegeScheduleState.allowed) {
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = collegeScheduleState.isLunch
+      ? `🍽️ Lunch Break (12:50–1:50 PM) • Locked`
+      : `🔒 Closed (Hours: 9:30 AM – 4:20 PM)`;
+    return;
+  }
+
+  // Gate 2: KIPM GIDA GPS Geofence (300m)
   if (!campusGeoState.ready) {
     verifyBtn.disabled = true;
     verifyBtn.textContent = '📡 Waiting for KIPM Campus GPS...';
     return;
   }
-
   if (!campusGeoState.insideCampus) {
     verifyBtn.disabled = true;
     verifyBtn.textContent = `🚫 Outside KIPM Building (${formatDistanceLabel(campusGeoState.distanceMeters)})`;
     return;
   }
 
+  // Gate 3: Strict Face Alignment & 90%+ Biometric Match
   if (!faceAlignmentState.aligned || matchedMemberIndex === null) {
     verifyBtn.disabled = true;
     verifyBtn.textContent = `🎯 ${faceAlignmentState.reason || 'Align Face Inside Box'}`;
@@ -193,8 +336,9 @@ function syncVerifyButtonState() {
   }
 
   const matched = state.members[matchedMemberIndex];
+  const pTag = collegeScheduleState.activePeriod?.id || 'LIVE';
   verifyBtn.disabled = false;
-  verifyBtn.textContent = `✅ Mark Present — ${matched.name} (${matchedConfidence}%)`;
+  verifyBtn.textContent = `✅ Mark Present (${pTag}) — ${matched.name} (${matchedConfidence}%)`;
 }
 
 // ================= 1. REAL-TIME LIVE CLOUD & FIREBASE SYNC =================
@@ -427,22 +571,25 @@ async function recordTamperProofEvent(rollId, action) {
   } catch {}
 }
 
-// ================= 2. STRICT FACE ALIGNMENT + 392-D BIOMETRIC + KIPM GEOFENCE GUARD =================
+// ================= 2. TRIPLE-GATE ATTENDANCE: SCHEDULE + KIPM GEOFENCE + ALIGNED FACE =================
 function upgradeAdvancedFaceSystem() {
-  // Enforce KIPM Geofence on manual Present marking as well
   const origMark = window.markAttendanceForMember;
   window.markAttendanceForMember = function (mIdx, sIdx, isPresent, viaFace = false) {
+    evaluateCollegeSchedule();
+    if (!collegeScheduleState.allowed) {
+      showToast(`🚫 Blocked: ${collegeScheduleState.statusText}. Attendance only allowed 9:30 AM–4:20 PM (excluding 12:50–1:50 PM lunch).`);
+      return false;
+    }
     if (isPresent && !campusGeoState.insideCampus) {
       const msg = campusGeoState.ready
-        ? `🚫 Blocked: You are ${formatDistanceLabel(campusGeoState.distanceMeters)} from KIPM GIDA. Must be within ${KIPM_CAMPUS.radiusMeters}m of the building.`
-        : '🚫 Blocked: Enable GPS and move within 300m of KIPM GIDA building to mark Present.';
+        ? `🚫 Blocked: You are ${formatDistanceLabel(campusGeoState.distanceMeters)} from KIPM GIDA. Must be within ${KIPM_CAMPUS.radiusMeters}m.`
+        : '🚫 Blocked: Enable GPS and move within 300m of KIPM GIDA building.';
       showToast(msg);
       return false;
     }
     return origMark(mIdx, sIdx, isPresent, viaFace);
   };
 
-  // Override toggleCamera so Verify button ALWAYS starts locked until aligned & at KIPM
   const origToggle = window.toggleCamera;
   window.toggleCamera = async function () {
     await origToggle();
@@ -452,7 +599,6 @@ function upgradeAdvancedFaceSystem() {
     syncVerifyButtonState();
   };
 
-  // 392-D Spatial Descriptor + Reticle Centering & Alignment Check + Liveness
   window.extractFaceDescriptor = function (videoEl) {
     const canvas = document.getElementById('face-process-canvas');
     const ctx = canvas.getContext('2d');
@@ -461,10 +607,9 @@ function upgradeAdvancedFaceSystem() {
     ctx.drawImage(videoEl, (vw - size) / 2, (vh - size) / 2, size, size, 0, 0, 140, 140);
     const imgData = ctx.getImageData(0, 0, 140, 140).data;
 
-    const desc = [], lumaGrid = [];
+    const desc = [], lumaGrid = [], coreLums = [];
     let totalLum = 0, edgeContrastSum = 0;
     let weightedX = 0, weightedY = 0, totalEdgeWeight = 0;
-    const coreLums = [];
 
     for (let by = 0; by < 14; by++) {
       for (let bx = 0; bx < 14; bx++) {
@@ -483,13 +628,10 @@ function upgradeAdvancedFaceSystem() {
       }
     }
 
-    // Compute edge-weighted centroid inside the 14x14 reticle to verify face alignment
     for (let by = 1; by < 13; by++) {
       for (let bx = 1; bx < 13; bx++) {
         const cur = lumaGrid[by * 14 + bx];
-        const gx = Math.abs(cur - lumaGrid[by * 14 + (bx - 1)]);
-        const gy = Math.abs(cur - lumaGrid[(by - 1) * 14 + bx]);
-        const mag = gx + gy;
+        const mag = Math.abs(cur - lumaGrid[by * 14 + (bx - 1)]) + Math.abs(cur - lumaGrid[(by - 1) * 14 + bx]);
         edgeContrastSum += mag;
         weightedX += bx * mag;
         weightedY += by * mag;
@@ -501,7 +643,6 @@ function upgradeAdvancedFaceSystem() {
     const sharpnessScore = Math.min(99, Math.round((edgeContrastSum / 144) * 520));
     const coreMean = coreLums.reduce((s, v) => s + v, 0) / coreLums.length;
     const coreStd = Math.sqrt(coreLums.reduce((s, v) => s + (v - coreMean) ** 2, 0) / coreLums.length);
-
     const cx = totalEdgeWeight > 0 ? (weightedX / totalEdgeWeight) / 13 : 0.5;
     const cy = totalEdgeWeight > 0 ? (weightedY / totalEdgeWeight) / 13 : 0.5;
 
@@ -623,11 +764,8 @@ function upgradeAdvancedFaceSystem() {
       const pct = Math.min(99.7, Math.max(0, bestSim * 100)).toFixed(2);
       const isAlignedAndMatched = sample.qualityOk && sample.isLive && bestSim >= 0.90 && bestIdx !== -1;
 
-      if (isAlignedAndMatched) {
-        faceAlignmentState.streak = Math.min(5, faceAlignmentState.streak + 1);
-      } else {
-        faceAlignmentState.streak = 0;
-      }
+      if (isAlignedAndMatched) faceAlignmentState.streak = Math.min(5, faceAlignmentState.streak + 1);
+      else faceAlignmentState.streak = 0;
 
       if (faceAlignmentState.streak >= 2) {
         matchedMemberIndex = bestIdx;
@@ -647,8 +785,13 @@ function upgradeAdvancedFaceSystem() {
           renderLiveAttendanceUI();
         }
 
-        // Auto-mark ONLY if toggle is ON + Aligned + Matched + Inside KIPM GIDA Campus
-        if (document.getElementById('auto-face-checkin-toggle')?.checked && campusGeoState.insideCampus && !autoCheckInCooldown) {
+        // Auto-mark ONLY if toggle ON + Active Period + Inside KIPM + Aligned Face
+        if (
+          document.getElementById('auto-face-checkin-toggle')?.checked &&
+          collegeScheduleState.allowed &&
+          campusGeoState.insideCampus &&
+          !autoCheckInCooldown
+        ) {
           const sIdx = Number(document.getElementById('live-subject-select').value);
           if (matched.subjects[sIdx] && !matched.subjects[sIdx].todayStatus) {
             autoCheckInCooldown = true;
@@ -676,24 +819,24 @@ function upgradeAdvancedFaceSystem() {
     }, 400);
   };
 
-  // STRICT verifyLiveFaceAttendance: ZERO fallback — requires BOTH KIPM Geofence AND Live Aligned Face Match!
   window.verifyLiveFaceAttendance = function () {
-    if (!campusGeoState.ready || !campusGeoState.insideCampus) {
-      const distTxt = campusGeoState.ready ? formatDistanceLabel(campusGeoState.distanceMeters) : 'Unknown distance';
-      showToast(`🚫 Attendance Blocked: You are ${distTxt} from KIPM GIDA building (Max allowed: ${KIPM_CAMPUS.radiusMeters}m).`);
+    evaluateCollegeSchedule();
+    if (!collegeScheduleState.allowed) {
+      showToast(`🚫 Attendance Locked: ${collegeScheduleState.statusText}`);
       return;
     }
-
+    if (!campusGeoState.ready || !campusGeoState.insideCampus) {
+      const distTxt = campusGeoState.ready ? formatDistanceLabel(campusGeoState.distanceMeters) : 'Unknown distance';
+      showToast(`🚫 Outside KIPM GIDA: ${distTxt} away (Must be within ${KIPM_CAMPUS.radiusMeters}m).`);
+      return;
+    }
     if (!faceAlignmentState.aligned || matchedMemberIndex === null) {
       showToast(`🎯 Face Not Aligned: ${faceAlignmentState.reason}. Align inside the green box first.`);
       return;
     }
 
     const m = state.members[matchedMemberIndex];
-    if (!m || !m.faceRegistered) {
-      showToast('No registered Face ID matched.');
-      return;
-    }
+    if (!m || !m.faceRegistered) return;
 
     const sIdx = Number(document.getElementById('live-subject-select').value);
     const s = m.subjects[sIdx];
@@ -703,6 +846,8 @@ function upgradeAdvancedFaceSystem() {
     }
 
     const distTag = formatDistanceLabel(campusGeoState.distanceMeters);
+    const pTag = collegeScheduleState.activePeriod ? `${collegeScheduleState.activePeriod.id} (${collegeScheduleState.activePeriod.timeText})` : 'LIVE';
+
     if (!window.markAttendanceForMember(matchedMemberIndex, sIdx, true, true)) return;
 
     const now = new Date();
@@ -711,12 +856,12 @@ function upgradeAdvancedFaceSystem() {
       time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       studentName: m.name,
       studentId: m.id,
-      subject: `${s.code} (${s.name})`,
+      subject: `${pTag} • ${s.code}`,
       confidence: `${matchedConfidence}% Aligned • KIPM (${distTag})`
     });
     window.saveState(state);
     renderLiveAttendanceUI();
-    recordTamperProofEvent(m.id, `KIPM_GEOFENCED_BIOMETRIC_PRESENT:${s.code}:${matchedConfidence}%:${distTag}`);
+    recordTamperProofEvent(m.id, `KIPM_ATTENDANCE:${pTag}:${s.code}:${matchedConfidence}%:${distTag}`);
   };
 }
 
