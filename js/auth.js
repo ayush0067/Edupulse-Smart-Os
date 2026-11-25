@@ -95,7 +95,6 @@ async function dispatchMobileOTP() {
     return;
   }
 
-  // Generate 6-digit OTP via Python backend if online, or Web Crypto locally
   let otpCode = String(Math.floor(100000 + Math.random() * 900000));
   try {
     const res = await fetch('/api/send-sms-otp', {
@@ -124,7 +123,6 @@ async function dispatchMobileOTP() {
   document.getElementById('forgot-stage-3').style.display = 'none';
   document.getElementById('forgot-otp-input').value = '';
 
-  // Start 60s countdown
   let secondsLeft = 60;
   const timerEl = document.getElementById('otp-timer-text');
   if (otpCountdownInterval) clearInterval(otpCountdownInterval);
@@ -177,14 +175,8 @@ function setupAuthUI() {
 
   document.getElementById('verify-otp-btn').addEventListener('click', () => {
     const entered = document.getElementById('forgot-otp-input').value.trim();
-    if (!activeRecoveryOTP) {
-      setAuthAlert('error', 'OTP expired or not sent. Click Resend.');
-      return;
-    }
-    if (entered !== activeRecoveryOTP) {
-      setAuthAlert('error', 'Incorrect 6-digit OTP. Check the SMS Gateway banner.');
-      return;
-    }
+    if (!activeRecoveryOTP) { setAuthAlert('error', 'OTP expired or not sent. Click Resend.'); return; }
+    if (entered !== activeRecoveryOTP) { setAuthAlert('error', 'Incorrect 6-digit OTP.'); return; }
     otpVerifiedStage = true;
     if (otpCountdownInterval) clearInterval(otpCountdownInterval);
     document.getElementById('otp-timer-text').textContent = '✅ Verified';
@@ -195,16 +187,10 @@ function setupAuthUI() {
 
   document.getElementById('forgot-password-form').addEventListener('submit', async e => {
     e.preventDefault();
-    if (!otpVerifiedStage || !activeRecoveryRollId) {
-      setAuthAlert('error', 'Complete Stage 2 OTP Verification first.');
-      return;
-    }
+    if (!otpVerifiedStage || !activeRecoveryRollId) { setAuthAlert('error', 'Complete Stage 2 OTP Verification first.'); return; }
     const p1 = document.getElementById('forgot-new-pass').value;
     const p2 = document.getElementById('forgot-confirm-pass').value;
-    if (p1.length < 4 || p1 !== p2) {
-      setAuthAlert('error', 'Passwords must match and be at least 4 characters.');
-      return;
-    }
+    if (p1.length < 4 || p1 !== p2) { setAuthAlert('error', 'Passwords must match and be at least 4 characters.'); return; }
     const member = state.members.find(m => m.id.toUpperCase() === activeRecoveryRollId);
     if (!member) return;
 
@@ -232,11 +218,11 @@ function setupAuthUI() {
       return;
     }
     if (member.status === 'pending') {
-      setAuthAlert('warning', `⏳ Pending Admin Approval for ${member.name} (${member.id}). Open Admin tab to approve.`);
+      setAuthAlert('warning', `⏳ Pending HOD/Coordinator Approval for ${member.name} (${member.id}).`);
       return;
     }
     if (member.status === 'rejected') {
-      setAuthAlert('error', `❌ Registration Rejected by Admin for ${member.id}.`);
+      setAuthAlert('error', `❌ Registration Rejected by HOD for ${member.id}.`);
       return;
     }
     stopAuthCamera();
@@ -267,7 +253,7 @@ function setupAuthUI() {
       performanceHistory: [75, 78, 80, 82, 85, 88], subjects: createBTechSubjects()
     });
 
-    logActivity(`New registration: ${name} (${rollId} | +91-${mobile}) — Awaiting Admin Approval`, 'Registration');
+    logActivity(`New registration: ${name} (${rollId} | +91-${mobile}) — Awaiting HOD Approval`, 'Registration');
     window.saveState(state);
     updatePendingBadges();
 
@@ -276,7 +262,7 @@ function setupAuthUI() {
     stopAuthCamera();
     document.querySelector('.auth-tab-btn[data-auth-tab="student-login"]').click();
     document.getElementById('login-roll-id').value = rollId;
-    setAuthAlert('warning', `✅ Registered ${name} (${rollId}) on Live DB! Switch to "🛡️ Admin" tab to approve in real time.`);
+    setAuthAlert('warning', `✅ Registered ${name} (${rollId})! Sign in under "🛡️ HOD / Coord" tab to approve.`);
   });
 
   document.getElementById('coordinator-login-form').addEventListener('submit', async e => {
@@ -284,7 +270,7 @@ function setupAuthUI() {
     const id = document.getElementById('coord-id').value.trim().toUpperCase();
     const pass = document.getElementById('coord-password').value;
     if (id !== 'HOD-ADMIN' || (await hashPassword(pass)) !== state.coordinatorHash) {
-      setAuthAlert('error', 'Invalid Admin credentials (Use HOD-ADMIN / admin123).');
+      setAuthAlert('error', 'Invalid HOD/Coordinator credentials (Use HOD-ADMIN / admin123).');
       return;
     }
     stopAuthCamera();
@@ -347,7 +333,7 @@ async function startFaceSignIn() {
       if (bestSim >= 0.90 && bestIdx !== -1) {
         const matched = state.members[bestIdx];
         stopAuthCamera();
-        if (matched.status !== 'approved') { setAuthAlert('warning', `Face matched (${matched.name}), awaiting Admin Approval.`); return; }
+        if (matched.status !== 'approved') { setAuthAlert('warning', `Face matched (${matched.name}), awaiting HOD Approval.`); return; }
         state.activeMemberIndex = bestIdx;
         state.session = { role: 'student', memberId: matched.id };
         window.saveState(state);
@@ -383,12 +369,61 @@ function updatePendingBadges() {
   });
 }
 
+// Switch between Dedicated HOD/Coordinator Executive Mode and Student Mode
+function applyRoleWorkspaceMode(isHod) {
+  document.querySelectorAll('.hod-only-nav').forEach(el => {
+    el.style.display = isHod ? 'block' : 'none';
+  });
+  document.querySelectorAll('.student-only-nav').forEach(el => {
+    el.style.display = isHod ? 'none' : 'block';
+  });
+
+  const switcher = document.getElementById('member-switcher');
+  const xpPill = document.getElementById('top-xp-pill');
+  const profileChip = document.getElementById('top-profile-chip');
+  const backToHodBtn = document.getElementById('back-to-hod-btn');
+
+  if (isHod) {
+    document.getElementById('sidebar-brand-icon').textContent = '🛡️';
+    document.getElementById('sidebar-brand-title').textContent = 'HOD Portal';
+    document.getElementById('sidebar-brand-sub').textContent = 'Dept. Governance OS';
+    document.getElementById('sidebar-footer-icon').textContent = '🏛️';
+    document.getElementById('sidebar-streak').textContent = 'HOD / Coordinator';
+    document.getElementById('sidebar-xp').textContent = 'Admin Access Active';
+
+    if (switcher) switcher.style.display = 'inline-block';
+    if (xpPill) xpPill.style.display = 'none';
+    if (profileChip) profileChip.style.display = 'none';
+    if (backToHodBtn) backToHodBtn.style.display = 'inline-block';
+  } else {
+    document.getElementById('sidebar-brand-icon').textContent = 'EP';
+    document.getElementById('sidebar-brand-title').textContent = 'EduPulse';
+    document.getElementById('sidebar-brand-sub').textContent = 'Smart Student OS';
+    document.getElementById('sidebar-footer-icon').textContent = '🔥';
+
+    if (switcher) switcher.style.display = 'none';
+    if (xpPill) xpPill.style.display = 'inline-block';
+    if (profileChip) profileChip.style.display = 'flex';
+    if (backToHodBtn) backToHodBtn.style.display = 'none';
+  }
+}
+
+function returnToHodDesk() {
+  const coordBtn = document.getElementById('nav-coordinator-btn');
+  if (coordBtn) coordBtn.click();
+}
+
+function scrollToHodSection(sectionId) {
+  setTimeout(() => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 80);
+}
+
 function checkSessionAndRender() {
   updatePendingBadges();
   const authScreen = document.getElementById('auth-screen');
   const appLayout = document.getElementById('app-layout');
   const coordBtn = document.getElementById('nav-coordinator-btn');
-  const switcher = document.getElementById('member-switcher');
 
   if (!state.session) {
     authScreen.style.display = 'flex';
@@ -399,34 +434,52 @@ function checkSessionAndRender() {
   appLayout.style.display = 'grid';
 
   if (state.session.role === 'coordinator') {
-    coordBtn.style.display = 'block';
-    switcher.style.display = 'inline-block';
+    applyRoleWorkspaceMode(true);
     coordBtn.click();
   } else {
-    coordBtn.style.display = 'none';
-    switcher.style.display = 'none';
+    applyRoleWorkspaceMode(false);
     const idx = state.members.findIndex(m => m.id === state.session.memberId);
     if (idx !== -1) state.activeMemberIndex = idx;
-    document.querySelector('.nav-btn[data-view="dashboard"]').click();
+    document.querySelector('.student-only-nav[data-view="dashboard"]').click();
   }
   renderAll();
 }
 
-// --- REAL-TIME ADMIN APPROVAL & LIVE DATABASE INLINE EDITOR ---
+// --- DEDICATED HOD / COORDINATOR PORTAL RENDERER ---
 function renderCoordinatorPortal() {
   updatePendingBadges();
   const pending = state.members.filter(m => m.status === 'pending');
   const approved = state.members.filter(m => m.status === 'approved');
   const faces = state.members.filter(m => m.faceRegistered).length;
 
+  // Calculate Department Average Attendance & Defaulters (<75%)
+  let deptAttSum = 0;
+  const defaulters = [];
+
+  state.members.forEach(m => {
+    const totAtt = m.subjects.reduce((s, x) => s + x.attended, 0);
+    const totCls = m.subjects.reduce((s, x) => s + x.total, 0);
+    const pct = totCls ? Number(((totAtt / totCls) * 100).toFixed(1)) : 0;
+    deptAttSum += pct;
+    if (pct < 75) {
+      const classesNeeded = Math.max(1, Math.ceil((0.75 * totCls - totAtt) / 0.25));
+      defaulters.push({ member: m, pct, classesNeeded });
+    }
+  });
+
+  const deptAvgAtt = state.members.length ? (deptAttSum / state.members.length).toFixed(1) : '0.0';
+
   if (document.getElementById('coord-kpi-pending')) document.getElementById('coord-kpi-pending').textContent = pending.length;
   if (document.getElementById('coord-kpi-approved')) document.getElementById('coord-kpi-approved').textContent = approved.length;
-  if (document.getElementById('coord-kpi-faces')) document.getElementById('coord-kpi-faces').textContent = `${faces} / ${state.members.length}`;
+  if (document.getElementById('coord-kpi-avg-att')) document.getElementById('coord-kpi-avg-att').textContent = `${deptAvgAtt}%`;
+  if (document.getElementById('coord-kpi-defaulters')) document.getElementById('coord-kpi-defaulters').textContent = defaulters.length;
+  if (document.getElementById('coord-kpi-faces')) document.getElementById('coord-kpi-faces').textContent = `Biometric IDs: ${faces} / ${state.members.length}`;
 
+  // 1. Pending Approvals Table
   const pBody = document.getElementById('pending-approvals-body');
   if (pBody) {
     pBody.innerHTML = !pending.length
-      ? `<tr><td colspan="6" style="color:var(--text-muted);text-align:center;">🎉 No pending registrations! Queue is clear.</td></tr>`
+      ? `<tr><td colspan="6" style="color:var(--text-muted);text-align:center;">🎉 All student registrations reviewed! No pending queue.</td></tr>`
       : pending.map(m => `
         <tr>
           <td>${m.facePhoto ? `<img src="${m.facePhoto}" class="roster-face-thumb"/>` : `<span class="badge badge-amber">No Photo</span>`}</td>
@@ -442,19 +495,58 @@ function renderCoordinatorPortal() {
         </tr>`).join('');
   }
 
+  // 2. Defaulters Watchlist (<75%)
+  const defBody = document.getElementById('hod-defaulters-body');
+  if (defBody) {
+    defBody.innerHTML = !defaulters.length
+      ? `<tr><td colspan="3" style="color:var(--green);text-align:center;">✅ Zero defaulters! Every student is above 75%.</td></tr>`
+      : defaulters.map(d => `
+        <tr>
+          <td><strong>${d.member.name}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${d.member.id} • +91-${d.member.mobile || 'N/A'}</div></td>
+          <td><span class="badge badge-red">${d.pct}%</span></td>
+          <td style="color:var(--amber);font-size:0.82rem;">Needs +${d.classesNeeded} classes</td>
+        </tr>`).join('');
+  }
+
+  // 3. Recent Biometric Check-Ins Feed
+  const auditBody = document.getElementById('hod-live-audit-body');
+  if (auditBody) {
+    auditBody.innerHTML = !state.liveLogs?.length
+      ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No live biometric scans recorded yet.</td></tr>`
+      : state.liveLogs.slice(0, 8).map(l => `
+        <tr>
+          <td>${l.time}</td>
+          <td><strong>${l.studentName}</strong> (${l.studentId})</td>
+          <td>${l.subject}</td>
+          <td><span class="badge badge-green">${l.confidence}</span></td>
+        </tr>`).join('');
+  }
+
+  // 4. Searchable & Filterable Complete Batch Student Registry
+  const searchQuery = (document.getElementById('hod-search-input')?.value || '').trim().toLowerCase();
+  const statusFilter = document.getElementById('hod-status-filter')?.value || 'ALL';
+
+  const filteredMembers = state.members.filter(m => {
+    const matchesStatus = statusFilter === 'ALL' || m.status === statusFilter;
+    const matchesSearch = !searchQuery || m.name.toLowerCase().includes(searchQuery) || m.id.toLowerCase().includes(searchQuery) || (m.mobile || '').includes(searchQuery);
+    return matchesStatus && matchesSearch;
+  });
+
   const aBody = document.getElementById('all-members-admin-body');
   if (aBody) {
-    aBody.innerHTML = state.members.map(m => {
+    aBody.innerHTML = filteredMembers.map(m => {
       const totAtt = m.subjects.reduce((s, x) => s + x.attended, 0);
       const totCls = m.subjects.reduce((s, x) => s + x.total, 0);
       const attPct = totCls ? Math.round((totAtt / totCls) * 100) : 0;
+      const avgMarks = m.subjects.reduce((s, x) => s + x.internal + x.midterm + x.assignments, 0) / m.subjects.length;
+      const cgpa = Math.min(10, avgMarks / 9.5).toFixed(2);
 
       if (editingRollId === m.id) {
         return `
           <tr style="background:rgba(34,211,238,0.08);">
-            <td><input type="text" id="edit-id-${m.id}" value="${m.id}" class="select-input" style="width:92px;padding:5px 8px;" /></td>
-            <td><input type="text" id="edit-name-${m.id}" value="${m.name}" class="select-input" style="width:155px;padding:5px 8px;" /></td>
-            <td><input type="tel" id="edit-mobile-${m.id}" value="${m.mobile || ''}" maxlength="10" class="select-input" style="width:115px;padding:5px 8px;" /></td>
+            <td><input type="text" id="edit-id-${m.id}" value="${m.id}" class="select-input" style="width:90px;padding:5px 8px;" /></td>
+            <td><input type="text" id="edit-name-${m.id}" value="${m.name}" class="select-input" style="width:150px;padding:5px 8px;" /></td>
+            <td><input type="tel" id="edit-mobile-${m.id}" value="${m.mobile || ''}" maxlength="10" class="select-input" style="width:110px;padding:5px 8px;" /></td>
             <td>
               <select id="edit-year-${m.id}" class="select-input" style="padding:5px 8px;">
                 <option value="B.Tech 2nd Year CSE" ${m.year.includes('2nd') ? 'selected' : ''}>2nd Yr CSE</option>
@@ -468,7 +560,7 @@ function renderCoordinatorPortal() {
                 <option value="rejected" ${m.status === 'rejected' ? 'selected' : ''}>Rejected</option>
               </select>
             </td>
-            <td><input type="number" id="edit-xp-${m.id}" value="${m.xp}" class="select-input" style="width:82px;padding:5px 8px;" /> XP</td>
+            <td><input type="number" id="edit-xp-${m.id}" value="${m.xp}" class="select-input" style="width:78px;padding:5px 8px;" /> XP</td>
             <td style="display:flex;gap:6px;flex-wrap:wrap;">
               <button class="btn-primary" style="padding:5px 10px;font-size:0.76rem;" onclick="saveEditedMember('${m.id}')">💾 Save</button>
               <button class="btn-outline" style="padding:5px 9px;font-size:0.76rem;" onclick="cancelEditMember()">Cancel</button>
@@ -484,29 +576,50 @@ function renderCoordinatorPortal() {
           <td style="font-family:'JetBrains Mono',monospace;">+91-${m.mobile || 'N/A'}</td>
           <td>${m.year}</td>
           <td><span class="badge ${badgeCls}">${m.status.toUpperCase()}</span></td>
-          <td><strong>${attPct}%</strong> • <span style="color:var(--cyan);">${m.xp} XP</span></td>
-          <td style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button class="btn-outline" style="padding:4px 9px;font-size:0.75rem;" onclick="startEditMember('${m.id}')">✏️ Edit</button>
+          <td><strong style="color:${attPct < 75 ? 'var(--red)' : 'var(--green)'};">${attPct}%</strong> • ${cgpa} CGPA</td>
+          <td style="display:flex;gap:5px;flex-wrap:wrap;">
+            <button class="btn-outline" style="padding:4px 8px;font-size:0.74rem;" onclick="inspectStudentFromHod('${m.id}')" title="See Student Dashboard">👁️ See</button>
+            <button class="btn-outline" style="padding:4px 8px;font-size:0.74rem;" onclick="startEditMember('${m.id}')">✏️ Edit</button>
             ${m.status !== 'approved'
-              ? `<button class="btn-primary" style="padding:4px 9px;font-size:0.75rem;" onclick="setMemberApproval('${m.id}','approved')">Approve</button>`
-              : `<button class="btn-outline" style="padding:4px 9px;font-size:0.75rem;" onclick="setMemberApproval('${m.id}','pending')">Hold</button>`}
-            <button class="btn-outline" style="padding:4px 8px;font-size:0.75rem;" onclick="coordinatorResetPassword('${m.id}')" title="Reset password to pass123">🔑</button>
-            <button class="btn-outline" style="padding:4px 8px;font-size:0.75rem;border-color:var(--red);color:var(--red);" onclick="deleteMemberRecord('${m.id}')" title="Delete student">🗑️</button>
+              ? `<button class="btn-primary" style="padding:4px 8px;font-size:0.74rem;" onclick="setMemberApproval('${m.id}','approved')">Approve</button>`
+              : `<button class="btn-outline" style="padding:4px 8px;font-size:0.74rem;" onclick="setMemberApproval('${m.id}','pending')">Hold</button>`}
+            <button class="btn-outline" style="padding:4px 7px;font-size:0.74rem;" onclick="coordinatorResetPassword('${m.id}')" title="Reset password to pass123">🔑</button>
+            <button class="btn-outline" style="padding:4px 7px;font-size:0.74rem;border-color:var(--red);color:var(--red);" onclick="deleteMemberRecord('${m.id}')" title="Delete student">🗑️</button>
           </td>
         </tr>`;
     }).join('');
   }
 }
 
-function startEditMember(rollId) {
-  editingRollId = rollId;
-  renderCoordinatorPortal();
+function inspectStudentFromHod(rollId) {
+  const idx = state.members.findIndex(m => m.id === rollId);
+  if (idx === -1) return;
+  state.activeMemberIndex = idx;
+  renderAll();
+  document.getElementById('hod-preview-student-btn')?.click();
+  showToast(`👁️ Inspecting ${state.members[idx].name} (${rollId}) — Click "🛡️ Back to HOD Desk" anytime.`);
 }
 
-function cancelEditMember() {
-  editingRollId = null;
-  renderCoordinatorPortal();
+function approveAllPending() {
+  const pending = state.members.filter(m => m.status === 'pending');
+  if (!pending.length) {
+    showToast('No pending student registrations to approve.');
+    return;
+  }
+  pending.forEach(m => {
+    m.status = 'approved';
+    logActivity(`HOD Batch-Approved ${m.name} (${m.id})`, 'HOD Approval');
+  });
+  window.saveState(state);
+  renderAll();
+  if (typeof recordTamperProofEvent === 'function') {
+    recordTamperProofEvent('HOD-ADMIN', `BATCH_APPROVED_COUNT:${pending.length}`);
+  }
+  showToast(`✅ Approved all ${pending.length} pending student registrations on Live DB!`);
 }
+
+function startEditMember(rollId) { editingRollId = rollId; renderCoordinatorPortal(); }
+function cancelEditMember() { editingRollId = null; renderCoordinatorPortal(); }
 
 function saveEditedMember(oldRollId) {
   const m = state.members.find(x => x.id === oldRollId);
@@ -531,11 +644,11 @@ function saveEditedMember(oldRollId) {
   m.initials = newName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   editingRollId = null;
-  logActivity(`Admin edited record: ${m.name} (${m.id} | +91-${m.mobile})`, 'Admin Edit');
+  logActivity(`HOD edited record: ${m.name} (${m.id} | +91-${m.mobile})`, 'HOD Edit');
   window.saveState(state);
   renderAll();
   if (typeof recordTamperProofEvent === 'function') {
-    recordTamperProofEvent(m.id, `ADMIN_LIVE_EDIT:STATUS_${m.status.toUpperCase()}:XP_${m.xp}`);
+    recordTamperProofEvent(m.id, `HOD_LIVE_EDIT:STATUS_${m.status.toUpperCase()}`);
   }
   showToast(`💾 Saved & synced ${m.name} (${m.id}) to Live Database!`);
 }
@@ -547,7 +660,7 @@ function deleteMemberRecord(rollId) {
   const removed = state.members[idx];
   state.members.splice(idx, 1);
   if (state.activeMemberIndex >= state.members.length) state.activeMemberIndex = 0;
-  logActivity(`Admin deleted record: ${removed.name} (${removed.id})`, 'Admin');
+  logActivity(`HOD deleted record: ${removed.name} (${removed.id})`, 'HOD Admin');
   window.saveState(state);
   renderAll();
   showToast(`🗑️ Removed ${removed.name} from Live Database.`);
@@ -557,11 +670,11 @@ function setMemberApproval(rollId, status) {
   const m = state.members.find(x => x.id === rollId);
   if (!m) return;
   m.status = status;
-  logActivity(`Admin ${status.toUpperCase()} ${m.name} (${m.id})`, 'Admin Approval');
+  logActivity(`HOD ${status.toUpperCase()} ${m.name} (${m.id})`, 'HOD Approval');
   window.saveState(state);
   renderAll();
   if (typeof recordTamperProofEvent === 'function') {
-    recordTamperProofEvent(m.id, `ADMIN_APPROVAL:${status.toUpperCase()}`);
+    recordTamperProofEvent(m.id, `HOD_APPROVAL:${status.toUpperCase()}`);
   }
   showToast(`✅ ${m.name} (${m.id}) set to ${status.toUpperCase()} on Live DB!`);
 }
@@ -570,7 +683,7 @@ async function coordinatorResetPassword(rollId) {
   const m = state.members.find(x => x.id === rollId);
   if (!m) return;
   m.passwordHash = await hashPassword('pass123');
-  logActivity(`Admin reset password for ${m.name} (${rollId})`, 'Security');
+  logActivity(`HOD reset password for ${m.name} (${rollId})`, 'Security');
   window.saveState(state);
   showToast(`🔑 Password for ${m.name} reset to "pass123" on Live DB.`);
 }

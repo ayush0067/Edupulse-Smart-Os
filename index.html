@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EduPulse Smart OS — Real-Time Admin Approval, Face ID & AI Tutor</title>
+  <title>EduPulse Smart OS — Dedicated HOD / Coordinator & Student Portal</title>
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -11,22 +11,22 @@
   <div class="ambient-orb orb-1"></div>
   <div class="ambient-orb orb-2"></div>
 
-  <!-- AUTHENTICATION, SELF-REGISTRATION, 3-STAGE OTP FORGOT PASSWORD & ADMIN APPROVAL -->
+  <!-- AUTHENTICATION, SELF-REGISTRATION, 3-STAGE OTP FORGOT PASSWORD & HOD/COORDINATOR LOGIN -->
   <div id="auth-screen" class="auth-screen">
     <div class="auth-card">
       <div class="brand" style="margin-bottom: 8px;">
         <div class="brand-icon">EP</div>
         <div>
           <h2>EduPulse Smart OS</h2>
-          <span>Real-Time Attendance, Biometric ID & Live Cloud Portal</span>
+          <span>B.Tech Attendance, Biometric ID & Academic Governance</span>
         </div>
       </div>
 
       <div class="auth-tabs">
-        <button type="button" class="auth-tab-btn active" data-auth-tab="student-login">🎓 Sign In</button>
+        <button type="button" class="auth-tab-btn active" data-auth-tab="student-login">🎓 Student Sign In</button>
         <button type="button" class="auth-tab-btn" data-auth-tab="student-register">📝 Register</button>
         <button type="button" class="auth-tab-btn" data-auth-tab="coordinator-login">
-          🛡️ Admin <span id="login-pending-badge" class="badge badge-amber" style="padding:2px 6px;font-size:0.68rem;">1</span>
+          🛡️ HOD / Coord <span id="login-pending-badge" class="badge badge-amber" style="padding:2px 6px;font-size:0.68rem;">1</span>
         </button>
       </div>
 
@@ -75,7 +75,6 @@
           <button type="button" id="back-to-login-btn" class="link-btn">← Back to Sign In</button>
         </div>
 
-        <!-- Visual 3-Stage Pipeline Indicator -->
         <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:14px; text-align:center; font-size:0.74rem;">
           <div id="pipe-step-1" class="badge badge-cyan" style="padding:6px 4px;">1. Mobile Match</div>
           <div id="pipe-step-2" class="badge" style="padding:6px 4px; background:rgba(255,255,255,0.05); color:var(--text-muted);">2. SMS OTP</div>
@@ -83,7 +82,6 @@
         </div>
 
         <form id="forgot-password-form">
-          <!-- STAGE 1: VERIFY ROLL ID & REGISTERED MOBILE NUMBER -->
           <div id="forgot-stage-1">
             <div class="auth-field">
               <div class="auth-field-header">
@@ -104,10 +102,8 @@
             </button>
           </div>
 
-          <!-- SMS GATEWAY RECEIPT BANNER -->
           <div id="otp-display-banner" class="otp-banner" style="display:none; margin-top:12px;"></div>
 
-          <!-- STAGE 2: 6-DIGIT OTP VERIFICATION -->
           <div id="forgot-stage-2" style="display:none; margin-top:12px;">
             <div class="auth-field">
               <div class="auth-field-header">
@@ -122,7 +118,6 @@
             </div>
           </div>
 
-          <!-- STAGE 3: SET NEW SHA-256 PASSWORD & SYNC TO LIVE DB -->
           <div id="forgot-stage-3" style="display:none; margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
             <div class="auth-field">
               <label>New Password</label>
@@ -142,7 +137,7 @@
         </form>
       </div>
 
-      <!-- TAB 2: STUDENT SELF-REGISTRATION (WITH MOBILE NO. + OPTIONAL FACE ID) -->
+      <!-- TAB 2: STUDENT SELF-REGISTRATION -->
       <div id="panel-student-register" class="auth-panel">
         <form id="student-register-form">
           <div class="auth-field">
@@ -181,28 +176,28 @@
             <img id="reg-face-preview" style="display:none; width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--green);" alt="Preview" />
           </div>
           <video id="reg-video" autoplay playsinline muted style="display:none; width:100%; border-radius:10px; margin-bottom:10px; transform:scaleX(-1);"></video>
-          <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Submit Registration for Live Approval ✓</button>
+          <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Submit Registration for HOD Approval ✓</button>
         </form>
       </div>
 
-      <!-- TAB 3: ADMIN / COORDINATOR APPROVAL LOGIN -->
+      <!-- TAB 3: DEDICATED HOD / COORDINATOR LOGIN -->
       <div id="panel-coordinator-login" class="auth-panel">
         <form id="coordinator-login-form">
           <div class="auth-field">
-            <label>Admin / Coordinator ID</label>
+            <label>HOD / Coordinator ID</label>
             <input type="text" id="coord-id" placeholder="HOD-ADMIN" required />
           </div>
           <div class="auth-field">
-            <label>Admin Password</label>
+            <label>HOD / Coordinator Password</label>
             <div class="pass-wrap">
               <input type="password" id="coord-password" placeholder="••••••••" required />
               <button type="button" class="eye-btn" onclick="togglePasswordField('coord-password', this)">👁️</button>
             </div>
           </div>
-          <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Open Real-Time Admin Approval Panel ➤</button>
+          <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Enter HOD / Coordinator Portal ➤</button>
         </form>
         <div class="demo-pills">
-          <button type="button" class="demo-pill" onclick="fillCoordinatorDemo()">Auto-Fill Admin (HOD-ADMIN / admin123)</button>
+          <button type="button" class="demo-pill" onclick="fillCoordinatorDemo()">Auto-Fill HOD / Coordinator (HOD-ADMIN / admin123)</button>
         </div>
       </div>
     </div>
@@ -212,29 +207,44 @@
   <div class="app-layout" id="app-layout" style="display:none;">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-icon">EP</div>
+        <div class="brand-icon" id="sidebar-brand-icon">EP</div>
         <div>
-          <h2>EduPulse</h2>
-          <span>Smart Student OS</span>
+          <h2 id="sidebar-brand-title">EduPulse</h2>
+          <span id="sidebar-brand-sub">Smart Student OS</span>
         </div>
       </div>
 
       <nav class="nav-menu">
-        <button class="nav-btn active" data-view="dashboard">📊 Dashboard</button>
-        <button class="nav-btn" data-view="attendance">📅 Attendance</button>
-        <button class="nav-btn" data-view="live">📡 Live Face Attendance</button>
-        <button class="nav-btn" data-view="academics">🎓 Academics & Insights</button>
-        <button class="nav-btn" data-view="solver">🧠 Problem Solver</button>
-        <button class="nav-btn" data-view="bot">🤖 AI Learning Bot</button>
-        <button class="nav-btn" data-view="rewards">🏆 Rewards & Streaks</button>
-        <button class="nav-btn" id="nav-coordinator-btn" data-view="coordinator" style="display:none;">
-          🛡️ Admin Approval <span id="coord-pending-badge" class="badge badge-amber" style="margin-left:6px;">1</span>
+        <!-- DEDICATED HOD / COORDINATOR EXECUTIVE NAVIGATION -->
+        <button class="nav-btn hod-only-nav" id="nav-coordinator-btn" data-view="coordinator" style="display:none;">
+          🛡️ HOD Approval Desk <span id="coord-pending-badge" class="badge badge-amber" style="margin-left:6px;">1</span>
         </button>
+        <button class="nav-btn hod-only-nav" data-view="coordinator" onclick="scrollToHodSection('hod-defaulters-section')" style="display:none;">
+          ⚠️ Defaulters (&lt;75%)
+        </button>
+        <button class="nav-btn hod-only-nav" data-view="coordinator" onclick="scrollToHodSection('hod-database-section')" style="display:none;">
+          🗄️ Live Student DB
+        </button>
+        <button class="nav-btn hod-only-nav" data-view="live" style="display:none;">
+          📡 Classroom Face Scan
+        </button>
+        <button class="nav-btn hod-only-nav" id="hod-preview-student-btn" data-view="dashboard" style="display:none;">
+          👁️ Inspect Student View
+        </button>
+
+        <!-- STUDENT NAVIGATION -->
+        <button class="nav-btn student-only-nav active" data-view="dashboard">📊 Dashboard</button>
+        <button class="nav-btn student-only-nav" data-view="attendance">📅 Attendance</button>
+        <button class="nav-btn student-only-nav" data-view="live">📡 Live Face Attendance</button>
+        <button class="nav-btn student-only-nav" data-view="academics">🎓 Academics & Insights</button>
+        <button class="nav-btn student-only-nav" data-view="solver">🧠 Problem Solver</button>
+        <button class="nav-btn student-only-nav" data-view="bot">🤖 AI Learning Bot</button>
+        <button class="nav-btn student-only-nav" data-view="rewards">🏆 Rewards & Streaks</button>
       </nav>
 
       <div class="sidebar-footer">
-        <div class="streak-mini">
-          <span class="streak-fire">🔥</span>
+        <div class="streak-mini" id="sidebar-streak-box">
+          <span class="streak-fire" id="sidebar-footer-icon">🔥</span>
           <div>
             <strong id="sidebar-streak">12 Day Streak</strong>
             <small id="sidebar-xp">1,450 XP</small>
@@ -251,10 +261,13 @@
         </div>
 
         <div class="topbar-actions">
-          <select id="member-switcher" class="select-input" title="Switch Active Student Profile"></select>
-          <div class="xp-pill">⚡ <span id="top-xp">1,450</span> XP</div>
+          <button type="button" id="back-to-hod-btn" class="btn-primary" style="display:none;" onclick="returnToHodDesk()">
+            🛡️ Back to HOD Desk
+          </button>
+          <select id="member-switcher" class="select-input" title="Inspect Student Record"></select>
+          <div class="xp-pill" id="top-xp-pill">⚡ <span id="top-xp">1,450</span> XP</div>
 
-          <div class="profile-chip">
+          <div class="profile-chip" id="top-profile-chip">
             <img id="top-face-thumb" class="avatar-img" style="display:none;" alt="Face" />
             <div id="top-avatar-initials" class="avatar">AK</div>
             <div>
@@ -544,49 +557,59 @@
         </div>
       </section>
 
-      <!-- VIEW 8: REAL-TIME ADMIN APPROVAL & LIVE DATABASE EDITOR -->
+      <!-- VIEW 8: DEDICATED HOD / COORDINATOR EXECUTIVE COMMAND CENTER -->
       <section id="view-coordinator" class="view">
-        <!-- Real-Time Cloud Sync Bar -->
-        <div class="glass-card" style="border-color: rgba(16, 185, 129, 0.35);">
-          <div class="card-header" style="margin-bottom: 6px;">
+        <!-- Executive Command Bar -->
+        <div class="glass-card" style="border-color: rgba(34, 211, 238, 0.38);">
+          <div class="card-header" style="margin-bottom: 8px;">
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-              <h3><span class="live-dot" style="background:var(--green);"></span>Real-Time Admin Approval & Live Database Sync</h3>
-              <span id="live-db-status-badge" class="badge badge-green">🟢 Live DB Synced</span>
+              <h3><span class="live-dot" style="background:var(--green);"></span>Department HOD & Coordinator Command Center</h3>
+              <span id="live-db-status-badge" class="badge badge-green">🟢 Real-Time DB Active</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-              <input type="text" id="sync-room-input" class="select-input" style="width:205px; font-family:'JetBrains Mono',monospace; font-size:0.78rem;" title="Shared Cloud Sync Channel" />
-              <button type="button" id="apply-sync-room-btn" class="btn-outline" style="font-size:0.8rem;">Connect Room</button>
-              <button type="button" id="force-sync-now-btn" class="btn-primary" style="font-size:0.8rem;">🔄 Push Live Sync</button>
+              <input type="text" id="sync-room-input" class="select-input" style="width:190px; font-family:'JetBrains Mono',monospace; font-size:0.78rem;" title="Live Sync Room ID" />
+              <button type="button" id="apply-sync-room-btn" class="btn-outline" style="font-size:0.8rem;">Connect</button>
+              <button type="button" id="force-sync-now-btn" class="btn-outline" style="font-size:0.8rem;">🔄 Sync Now</button>
+              <button type="button" id="hod-export-report-btn" class="btn-primary" style="font-size:0.82rem;">📊 Export HOD Report</button>
             </div>
           </div>
           <small id="live-sync-timestamp" style="color:var(--text-muted); font-family:'JetBrains Mono',monospace;">
-            Auto-syncing changes across all tabs, devices & SQLite3 in real time...
+            Monitoring live student registrations, attendance compliance & biometric check-ins...
           </small>
         </div>
 
+        <!-- 4 Executive Department KPIs -->
         <div class="kpi-grid">
           <div class="kpi-card amber">
             <span class="kpi-label">Pending Approvals</span>
             <h3 id="coord-kpi-pending">0</h3>
-            <small>Live queue awaiting sign-off</small>
+            <small>Awaiting HOD / Coordinator sign-off</small>
           </div>
           <div class="kpi-card green">
             <span class="kpi-label">Approved Students</span>
             <h3 id="coord-kpi-approved">0</h3>
-            <small>Active sign-in & Face ID enabled</small>
+            <small>Verified active batch strength</small>
           </div>
           <div class="kpi-card cyan">
-            <span class="kpi-label">Enrolled Face IDs</span>
-            <h3 id="coord-kpi-faces">0 / 0</h3>
-            <small>Biometric templates in DB</small>
+            <span class="kpi-label">Dept Avg Attendance</span>
+            <h3 id="coord-kpi-avg-att">0%</h3>
+            <small>Across all B.Tech CSE sections</small>
+          </div>
+          <div class="kpi-card purple">
+            <span class="kpi-label">Defaulters (&lt;75%)</span>
+            <h3 id="coord-kpi-defaulters">0</h3>
+            <small id="coord-kpi-faces">Biometric IDs: 0 / 0</small>
           </div>
         </div>
 
-        <!-- Pending Registrations Queue -->
-        <div class="glass-card">
+        <!-- SECTION A: REAL-TIME APPROVAL QUEUE -->
+        <div class="glass-card" id="hod-approvals-section" style="border-color: rgba(245, 158, 11, 0.35);">
           <div class="card-header">
-            <h3>⏳ Pending Student Self-Registrations (Real-Time Queue)</h3>
-            <span class="badge badge-amber">Instant Approval</span>
+            <div>
+              <h3>⏳ Pending Student Self-Registrations (Approve / Reject in Real Time)</h3>
+              <small style="color:var(--text-muted);">Students cannot sign in until approved here by the HOD or Coordinator</small>
+            </div>
+            <button type="button" id="approve-all-pending-btn" class="btn-primary" onclick="approveAllPending()">✅ Approve All Pending</button>
           </div>
           <div class="table-wrap">
             <table class="data-table">
@@ -597,7 +620,7 @@
                   <th>Roll ID</th>
                   <th>Mobile No.</th>
                   <th>Program</th>
-                  <th>Admin Decision</th>
+                  <th>HOD / Coordinator Decision</th>
                 </tr>
               </thead>
               <tbody id="pending-approvals-body"></tbody>
@@ -605,12 +628,63 @@
           </div>
         </div>
 
-        <!-- Full Live Database Editor (Edit Name, Mobile, Roll ID, Status, Attendance, XP) -->
-        <div class="glass-card">
+        <!-- SECTION B: DEFAULTERS WATCHLIST (<75%) & LIVE BIOMETRIC AUDIT LOG -->
+        <div class="bottom-grid" id="hod-defaulters-section">
+          <div class="glass-card">
+            <div class="card-header">
+              <h3>⚠️ Attendance Defaulters Watchlist (&lt;75%)</h3>
+              <span class="badge badge-red">University Detainment Alert</span>
+            </div>
+            <div class="table-wrap" style="max-height: 230px; overflow-y: auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Overall Att %</th>
+                    <th>Shortage Guidance</th>
+                  </tr>
+                </thead>
+                <tbody id="hod-defaulters-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div class="card-header">
+              <h3>📡 Recent Biometric Check-Ins (Live Feed)</h3>
+              <span class="badge badge-cyan">392-D Verified</span>
+            </div>
+            <div class="table-wrap" style="max-height: 230px; overflow-y: auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Student</th>
+                    <th>Lecture</th>
+                    <th>Confidence</th>
+                  </tr>
+                </thead>
+                <tbody id="hod-live-audit-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION C: COMPLETE LIVE STUDENT DATABASE & INLINE EDITOR -->
+        <div class="glass-card" id="hod-database-section">
           <div class="card-header">
             <div>
-              <h3>🛠️ Live Student Database Editor (Click "✏️ Edit" to Modify Any Record)</h3>
-              <small style="color:var(--text-muted);">All edits commit immediately to Live Cloud DB, LocalStorage & Python SQLite3</small>
+              <h3>🗄️ Complete Batch Student Registry & Live Record Editor</h3>
+              <small style="color:var(--text-muted);">Search, filter, inspect, edit details, reset passwords, or toggle approval status live</small>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <input type="text" id="hod-search-input" placeholder="🔍 Search Name or Roll ID..." class="select-input" style="width:200px;" oninput="renderCoordinatorPortal()" />
+              <select id="hod-status-filter" class="select-input" onchange="renderCoordinatorPortal()">
+                <option value="ALL">All Statuses</option>
+                <option value="approved">Approved Only</option>
+                <option value="pending">Pending Only</option>
+                <option value="rejected">Rejected Only</option>
+              </select>
             </div>
           </div>
           <div class="table-wrap">
@@ -622,8 +696,8 @@
                   <th>Mobile (+91)</th>
                   <th>Program / Year</th>
                   <th>Status</th>
-                  <th>Att % / XP</th>
-                  <th>Live Actions</th>
+                  <th>Att % / CGPA</th>
+                  <th>HOD Live Actions</th>
                 </tr>
               </thead>
               <tbody id="all-members-admin-body"></tbody>

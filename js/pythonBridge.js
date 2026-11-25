@@ -768,3 +768,31 @@ async function updateDynamicQRToken() {
   if (document.getElementById('qr-token-text')) document.getElementById('qr-token-text').textContent = `EP-${m.id}-${hex}`;
   if (document.getElementById('qr-timer-badge')) document.getElementById('qr-timer-badge').textContent = `${left}s`;
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  const hodExpBtn = document.getElementById('hod-export-report-btn');
+  if (hodExpBtn) {
+    hodExpBtn.addEventListener('click', async () => {
+      if (pythonOnline) {
+        await syncToPythonSQLite(state);
+        window.location.href = '/api/hod-excel';
+        showToast('📊 Exporting 3-Sheet Styled HOD Executive Excel (.xlsx)...');
+      } else {
+        const headers = ['Roll ID', 'Student Name', 'Mobile', 'Year', 'Approval Status', 'Attendance %', 'XP'];
+        const rows = state.members.map(m => {
+          const att = m.subjects.reduce((s, x) => s + x.attended, 0);
+          const tot = m.subjects.reduce((s, x) => s + x.total, 0);
+          const pct = tot ? ((att / tot) * 100).toFixed(1) + '%' : '0%';
+          return [m.id, m.name, `+91-${m.mobile || ''}`, m.year, m.status.toUpperCase(), pct, m.xp];
+        });
+        const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `HOD_Department_Audit_${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        showToast('📥 Exported HOD Department Audit Report (.csv)!');
+      }
+    });
+  }
+});
