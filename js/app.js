@@ -7,14 +7,14 @@ let matchedMemberIndex = null;
 let matchedConfidence = 0;
 
 const VIEW_META = {
-  dashboard: ['Dashboard Overview', 'B.Tech 2nd & 3rd Year attendance, biometric ID & study insights'],
+  dashboard: ['Dashboard Overview', 'Real-time attendance, biometric ID & study insights'],
   attendance: ['Smart Attendance Tracker', 'Once marked for today, attendance is permanently locked (Cannot Reverse)'],
   live: ['Live Face Registration & Attendance', 'Enroll student biometrics & verify attendance live'],
   academics: ['Academics & Study Insights', 'Detailed B.Tech subject marks & AI focus recommendations'],
   solver: ['In-App Problem Solver', 'B.Tech questions — Once answered, options lock permanently'],
   bot: ['Live Online AI Learning Bot', 'Ask ANY question online & earn study XP'],
   rewards: ['Rewards & Streaks', 'Redeem earned XP from attendance, Face ID & problem solving'],
-  coordinator: ['HOD & Coordinator Governance Portal', 'Dedicated Teachers & Admin Portal — Approve registrations, verify live photos & audit attendance']
+  coordinator: ['Admin, HOD & Coordinator Governance Portal', 'Real-Time Approvals, Live Cloud DB & Biometric Audit']
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -32,8 +32,6 @@ function setupNavigation() {
     btn.addEventListener('click', () => {
       const target = btn.dataset.view;
       const role = state.session?.role;
-
-      // Strict Role Guard: Students cannot open HOD views; HODs stay in Faculty views
       if (role === 'student' && target === 'coordinator') return;
       if (role === 'coordinator' && !['coordinator', 'live'].includes(target)) return;
 
@@ -51,16 +49,6 @@ function setupNavigation() {
 }
 
 function setupControls() {
-  document.getElementById('reset-demo-btn')?.addEventListener('click', async () => {
-    const sess = state.session;
-    state = resetState();
-    await ensureDefaultHashes();
-    state.session = sess;
-    window.saveState(state);
-    renderAll();
-    showToast('Demo session reset.');
-  });
-
   document.getElementById('solver-subject-filter')?.addEventListener('change', renderSolverList);
   document.getElementById('set-apikey-btn')?.addEventListener('click', () => {
     const k = prompt('Paste Google Gemini API Key:', localStorage.getItem('edupulse_gemini_key') || '');
@@ -86,9 +74,9 @@ function setupControls() {
     if (!name || !id) return;
     const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
     state.members.push({
-      name, id, mobile, year, initials, passwordHash: await hashPassword('pass123'), status: 'approved',
-      streak: 1, xp: 500, faceRegistered: false, facePhoto: null, faceDescriptor: null,
-      performanceHistory: [75, 78, 80, 82, 84, 86], subjects: createBTechSubjects()
+      name, id, mobile, mobileVerified: true, year, initials, passwordHash: await hashPassword('pass123'), status: 'approved',
+      streak: 1, xp: 100, faceRegistered: false, facePhoto: null, faceDescriptor: null,
+      performanceHistory: [0, 0, 0, 0, 0, 0], subjects: createBTechSubjects()
     });
     state.activeMemberIndex = state.members.length - 1;
     e.target.reset();
@@ -121,22 +109,17 @@ function renderHeaderAndKPIs() {
   const ft = document.getElementById('top-face-thumb');
   const ini = document.getElementById('top-avatar-initials');
 
-  // If logged in as HOD / Coordinator, display their Faculty Profile & Live Verification Photo in Topbar
   if (state.session?.role === 'coordinator') {
     const fac = (state.coordinators || []).find(c => c.id === state.session.memberId) || state.coordinators[0];
     if (fac) {
       document.getElementById('student-name').textContent = fac.name;
       document.getElementById('student-id').textContent = `${fac.designation} • ${fac.id}`;
-      if (fac.facePhoto) {
-        ft.src = fac.facePhoto; ft.style.display = 'block'; ini.style.display = 'none';
-      } else {
-        ft.style.display = 'none'; ini.style.display = 'grid'; ini.textContent = fac.initials || 'HD';
-      }
+      if (fac.facePhoto) { ft.src = fac.facePhoto; ft.style.display = 'block'; ini.style.display = 'none'; }
+      else { ft.style.display = 'none'; ini.style.display = 'grid'; ini.textContent = fac.initials || 'HD'; }
     }
     return;
   }
 
-  // Otherwise render Active Student Profile & KPIs
   const m = getActiveMember(state);
   if (!m) return;
   document.getElementById('student-name').textContent = m.name;
@@ -155,11 +138,11 @@ function renderHeaderAndKPIs() {
   const faces = state.members.filter(x => x.faceRegistered).length;
 
   document.getElementById('kpi-attendance').textContent = `${attPct}%`;
-  document.getElementById('kpi-attendance-note').textContent = Number(attPct) >= 75 ? 'On Track (Above 75%)' : 'Action Needed (Below 75%)';
+  document.getElementById('kpi-attendance-note').textContent = totals.tot === 0 ? 'No classes marked yet' : (Number(attPct) >= 75 ? 'On Track (Above 75%)' : 'Action Needed (Below 75%)');
   document.getElementById('kpi-cgpa').textContent = cgpa;
   document.getElementById('kpi-year-tag').textContent = m.year;
   document.getElementById('kpi-xp').textContent = `${m.xp.toLocaleString()} XP`;
-  document.getElementById('kpi-rank').textContent = m.xp >= 1500 ? 'Rank: Platinum Scholar' : 'Rank: Gold Scholar';
+  document.getElementById('kpi-rank').textContent = m.xp >= 1500 ? 'Rank: Platinum Scholar' : 'Rank: Rising Scholar';
   document.getElementById('kpi-faces').textContent = `${faces} / ${state.members.length}`;
 }
 
@@ -171,21 +154,22 @@ function renderRecentActivity() {
 function renderAttendanceCards() {
   const m = getActiveMember(state);
   const grid = document.getElementById('attendance-cards-grid');
-  if (!grid) return;
+  if (!grid || !m) return;
   grid.innerHTML = m.subjects.map((s, idx) => {
     const pct = s.total ? Math.round((s.attended / s.total) * 100) : 0;
-    const isSafe = pct >= 75;
+    const isSafe = s.total === 0 || pct >= 75;
     const locked = Boolean(s.todayStatus);
-    const guide = isSafe ? `Can miss ${Math.max(0, Math.floor((s.attended - 0.75 * s.total) / 0.75))} classes` : `Attend next ${Math.ceil((0.75 * s.total - s.attended) / 0.25)} classes`;
+    const guide = s.total === 0 ? 'Mark your first class today' : (isSafe ? `Can miss ${Math.max(0, Math.floor((s.attended - 0.75 * s.total) / 0.75))} classes` : `Attend next ${Math.ceil((0.75 * s.total - s.attended) / 0.25)} classes`);
     const action = locked
       ? `<div class="lock-banner ${s.todayStatus}"><span>🔒 Locked: ${s.todayStatus.toUpperCase()} (${s.todayTime})</span><span>Irreversible</span></div>`
       : `<div class="subject-actions"><button class="btn-primary" onclick="markAttendanceForMember(${state.activeMemberIndex},${idx},true)">+ Present (+25 XP)</button><button class="btn-outline" onclick="markAttendanceForMember(${state.activeMemberIndex},${idx},false)">Absent</button></div>`;
-    return `<div class="subject-card ${locked ? 'locked-card' : ''}"><div class="card-header" style="margin-bottom:6px;"><div><strong>${s.name}</strong><div style="color:var(--text-muted);font-size:0.78rem;">${s.code} • ${s.yearTag}</div></div><span class="badge ${isSafe ? 'badge-green' : 'badge-red'}">${isSafe ? 'On Track' : 'At Risk'}</span></div><div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${isSafe ? 'var(--green)' : 'var(--red)'};"></div></div><div class="subject-stats"><span>Attended: <strong>${s.attended}/${s.total}</strong></span><span><strong>${pct}%</strong></span></div><div style="font-size:0.82rem;color:${isSafe ? 'var(--green)' : 'var(--red)'};">${guide}</div>${action}</div>`;
+    return `<div class="subject-card ${locked ? 'locked-card' : ''}"><div class="card-header" style="margin-bottom:6px;"><div><strong>${s.name}</strong><div style="color:var(--text-muted);font-size:0.78rem;">${s.code} • ${s.yearTag}</div></div><span class="badge ${isSafe ? 'badge-green' : 'badge-red'}">${s.total === 0 ? 'New' : (isSafe ? 'On Track' : 'At Risk')}</span></div><div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${isSafe ? 'var(--green)' : 'var(--red)'};"></div></div><div class="subject-stats"><span>Attended: <strong>${s.attended}/${s.total}</strong></span><span><strong>${pct}%</strong></span></div><div style="font-size:0.82rem;color:${isSafe ? 'var(--green)' : 'var(--red)'};">${guide}</div>${action}</div>`;
   }).join('');
 }
 
 function markAttendanceForMember(mIdx, sIdx, isPresent, viaFace = false) {
   const m = state.members[mIdx];
+  if (!m) return false;
   const s = m.subjects[sIdx];
   if (!s || s.todayStatus) return false;
   s.total += 1;
@@ -211,28 +195,39 @@ function startLiveClock() {
 
 function renderLiveAttendanceUI() {
   const mSel = document.getElementById('live-member-select');
-  if (mSel) {
-    const prev = mSel.value;
-    mSel.innerHTML = state.members.map((m, i) => `<option value="${i}">${m.name} (${m.id}) ${m.faceRegistered ? '✅' : '⚠️'}</option>`).join('');
-    mSel.value = prev !== '' && state.members[Number(prev)] ? prev : String(state.activeMemberIndex);
-  }
   const sSel = document.getElementById('live-subject-select');
-  const tm = state.members[Number(mSel?.value || state.activeMemberIndex)] || getActiveMember(state);
-  if (sSel && tm) {
-    sSel.innerHTML = tm.subjects.map((s, i) => `<option value="${i}" ${s.todayStatus ? 'disabled' : ''}>${s.code} — ${s.name}${s.todayStatus ? ' [🔒 Locked]' : ''}</option>`).join('');
-  }
-  const rc = document.getElementById('roster-count'); if (rc) rc.textContent = state.members.length;
+  const rc = document.getElementById('roster-count');
   const rb = document.getElementById('members-roster-body');
-  if (rb) {
-    rb.innerHTML = state.members.map((m, i) => {
-      const t = m.subjects.reduce((a, s) => ({ att: a.att + s.attended, tot: a.tot + s.total }), { att: 0, tot: 0 });
-      const pct = t.tot ? Math.round((t.att / t.tot) * 100) : 0;
-      return `<tr><td>${m.facePhoto ? `<img src="${m.facePhoto}" class="roster-face-thumb"/>` : `<div class="avatar" style="width:32px;height:32px;font-size:0.75rem;">${m.initials}</div>`}</td><td><strong>${m.name}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${m.id}</div></td><td><strong>${pct}%</strong></td><td><span class="badge ${m.faceRegistered ? 'badge-green' : 'badge-amber'}">${m.faceRegistered ? '✅ Registered' : '⚠️ Pending'}</span></td><td><button class="btn-outline" style="padding:4px 8px;font-size:0.75rem;" onclick="selectMemberForFaceReg(${i})">Select</button></td></tr>`;
-    }).join('');
-  }
   const lb = document.getElementById('live-log-body');
+
+  if (rc) rc.textContent = state.members.length;
+
+  if (!state.members.length) {
+    if (mSel) mSel.innerHTML = `<option value="">No students registered yet</option>`;
+    if (sSel) sSel.innerHTML = `<option value="">Register a student first</option>`;
+    if (rb) rb.innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);text-align:center;">No students registered yet.</td></tr>`;
+  } else {
+    if (mSel) {
+      const prev = mSel.value;
+      mSel.innerHTML = state.members.map((m, i) => `<option value="${i}">${m.name} (${m.id}) ${m.faceRegistered ? '✅' : '⚠️'}</option>`).join('');
+      mSel.value = prev !== '' && state.members[Number(prev)] ? prev : String(state.activeMemberIndex);
+    }
+    const tm = state.members[Number(mSel?.value || state.activeMemberIndex)] || getActiveMember(state);
+    if (sSel && tm) {
+      sSel.innerHTML = tm.subjects.map((s, i) => `<option value="${i}" ${s.todayStatus ? 'disabled' : ''}>${s.code} — ${s.name}${s.todayStatus ? ' [🔒 Locked]' : ''}</option>`).join('');
+    }
+    if (rb) {
+      rb.innerHTML = state.members.map((m, i) => {
+        const t = m.subjects.reduce((a, s) => ({ att: a.att + s.attended, tot: a.tot + s.total }), { att: 0, tot: 0 });
+        const pct = t.tot ? Math.round((t.att / t.tot) * 100) : 0;
+        return `<tr><td>${m.facePhoto ? `<img src="${m.facePhoto}" class="roster-face-thumb"/>` : `<div class="avatar" style="width:32px;height:32px;font-size:0.75rem;">${m.initials}</div>`}</td><td><strong>${m.name}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${m.id}</div></td><td><strong>${pct}%</strong></td><td><span class="badge ${m.faceRegistered ? 'badge-green' : 'badge-amber'}">${m.faceRegistered ? '✅ Registered' : '⚠️ Pending'}</span></td><td><button class="btn-outline" style="padding:4px 8px;font-size:0.75rem;" onclick="selectMemberForFaceReg(${i})">Select</button></td></tr>`;
+      }).join('');
+    }
+  }
+
   if (lb) {
-    lb.innerHTML = !state.liveLogs.length ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No check-ins yet.</td></tr>`
+    lb.innerHTML = !state.liveLogs.length
+      ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No check-ins yet.</td></tr>`
       : state.liveLogs.map(l => `<tr><td>${l.time}</td><td><strong>${l.studentName}</strong></td><td>${l.subject}</td><td><span class="badge badge-green">🔒 ${l.confidence}</span></td></tr>`).join('');
   }
 }
@@ -304,7 +299,7 @@ function startContinuousFaceScan() {
   faceScanTimer = setInterval(() => {
     if (!liveStream || video.readyState < 2) return;
     const enrolled = state.members.map((m, idx) => ({ m, idx })).filter(x => x.m.faceRegistered && x.m.faceDescriptor);
-    if (!enrolled.length) { banner.textContent = '⚠️ Select a member and click "🪪 Register Face ID"!'; return; }
+    if (!enrolled.length) { banner.textContent = '⚠️ No student faces enrolled yet.'; return; }
     const sample = extractFaceDescriptor(video);
     let bestIdx = -1, bestSim = -1;
     enrolled.forEach(({ m, idx }) => {
@@ -331,10 +326,12 @@ function startContinuousFaceScan() {
 }
 
 function registerMemberFace() {
+  if (!state.members.length) { showToast('Register a student first!'); return; }
   const video = document.getElementById('live-video');
   if (!liveStream || video.readyState < 2) return;
   const idx = Number(document.getElementById('live-member-select').value);
   const m = state.members[idx];
+  if (!m) return;
   const sample = extractFaceDescriptor(video);
   m.faceRegistered = true; m.facePhoto = sample.thumbnail; m.faceDescriptor = sample.vector; m.xp += 50;
   logActivity(`Registered Face ID for ${m.name} (+50 XP)`, 'Face ID');
@@ -344,8 +341,10 @@ function registerMemberFace() {
 }
 
 function verifyLiveFaceAttendance() {
+  if (!state.members.length) { showToast('No students registered yet.'); return; }
   const idx = matchedMemberIndex !== null ? matchedMemberIndex : Number(document.getElementById('live-member-select').value);
   const m = state.members[idx];
+  if (!m) return;
   if (!m.faceRegistered) { showToast(`Register Face ID for ${m.name} first!`); return; }
   const sIdx = Number(document.getElementById('live-subject-select').value);
   const s = m.subjects[sIdx];
@@ -364,15 +363,16 @@ function exportHODReportCSV() {
 
 function renderAcademics() {
   const m = getActiveMember(state);
+  if (!m) return;
   let lowSub = '', lowVal = 101;
   const tbody = document.getElementById('academics-table-body');
   if (tbody) tbody.innerHTML = m.subjects.map(s => {
     const tot = s.internal + s.midterm + s.assignments;
     if (tot < lowVal) { lowVal = tot; lowSub = `${s.code} (${s.name})`; }
-    return `<tr><td><strong>${s.code}</strong></td><td>${s.name}</td><td>${s.internal}</td><td>${s.midterm}</td><td>${s.assignments}</td><td><strong>${tot}%</strong></td><td><span class="badge badge-purple">${getGradeLetter(tot)}</span></td><td><span class="badge ${tot >= 75 ? 'badge-green' : 'badge-red'}">${tot >= 75 ? 'Strong' : 'Needs Focus'}</span></td></tr>`;
+    return `<tr><td><strong>${s.code}</strong></td><td>${s.name}</td><td>${s.internal}</td><td>${s.midterm}</td><td>${s.assignments}</td><td><strong>${tot}%</strong></td><td><span class="badge badge-purple">${getGradeLetter(tot)}</span></td><td><span class="badge ${tot >= 75 ? 'badge-green' : 'badge-amber'}">${tot === 0 ? 'Pending Marks' : (tot >= 75 ? 'Strong' : 'Needs Focus')}</span></td></tr>`;
   }).join('');
   const ib = document.getElementById('study-insights-box');
-  if (ib) ib.innerHTML = `<div class="card-header"><h3>✨ AI Study Insights — ${m.name}</h3><span class="badge badge-cyan">Auto-Analyzed</span></div><p style="color:var(--text-muted);">Lowest scoring subject: <strong style="color:var(--amber);">${lowSub} (${lowVal}%)</strong>. Practice MCQs or use the AI Learning Bot to boost readiness.</p>`;
+  if (ib) ib.innerHTML = `<div class="card-header"><h3>✨ AI Study Insights — ${m.name}</h3><span class="badge badge-cyan">Live Profile</span></div><p style="color:var(--text-muted);">Focus subject: <strong style="color:var(--amber);">${lowSub}</strong>. Practice MCQs or use the AI Learning Bot to prepare.</p>`;
 }
 
 function renderSolverList() {
@@ -397,9 +397,10 @@ function openQuestion(id) {
 
 function submitAnswer(id, idx) {
   const q = state.questions.find(x => x.id === id);
-  if (!q || q.attempted || q.solved) return;
+  const m = getActiveMember(state);
+  if (!q || !m || q.attempted || q.solved) return;
   q.attempted = true; q.selectedIdx = idx;
-  if (idx === q.answerIndex) { q.solved = true; getActiveMember(state).xp += q.xp; }
+  if (idx === q.answerIndex) { q.solved = true; m.xp += q.xp; }
   window.saveState(state); renderAll(); openQuestion(id);
 }
 
@@ -418,6 +419,7 @@ async function handleAIGenerate() {
 
 function renderRewards() {
   const m = getActiveMember(state);
+  if (!m) return;
   if (document.getElementById('rewards-xp-balance')) document.getElementById('rewards-xp-balance').textContent = `${m.xp.toLocaleString()} XP`;
   if (document.getElementById('rewards-streak')) document.getElementById('rewards-streak').textContent = `${m.streak} Days`;
   const rg = document.getElementById('rewards-grid');
@@ -426,9 +428,9 @@ function renderRewards() {
 
 function claimReward(id) {
   const m = getActiveMember(state), r = state.rewards.find(x => x.id === id);
-  if (!r || r.claimed || m.xp < r.cost) return;
+  if (!m || !r || r.claimed || m.xp < r.cost) return;
   m.xp -= r.cost; r.claimed = true; window.saveState(state); renderAll();
 }
 
 function logActivity(text, tag) { state.activities.unshift({ text, time: 'Just now', tag }); }
-function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600); }
+function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2800); }

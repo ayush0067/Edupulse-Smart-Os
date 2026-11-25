@@ -1,58 +1,44 @@
-﻿const STORAGE_KEY = 'edupulse_student_data_v8';
+﻿const STORAGE_KEY = 'edupulse_live_prod_v1';
 
-function createBTechSubjects(offsets = [0, 0, 0, 0, 0, 0, 0]) {
-  const base = [
-    { code: 'BCS-301', name: 'Data Structures & Algo', yearTag: '2nd Yr • Sem 3', attended: 26, total: 30, internal: 28, midterm: 27, assignments: 38 },
-    { code: 'BCS-302', name: 'Computer Org. & Arch.', yearTag: '2nd Yr • Sem 3', attended: 22, total: 28, internal: 24, midterm: 22, assignments: 33 },
-    { code: 'BCS-303', name: 'Discrete Structures', yearTag: '2nd Yr • Sem 3', attended: 24, total: 26, internal: 27, midterm: 26, assignments: 36 },
-    { code: 'BAS-303', name: 'Engg. Mathematics-III', yearTag: '2nd Yr • Sem 3', attended: 21, total: 26, internal: 26, midterm: 25, assignments: 35 },
-    { code: 'BCS-401', name: 'Operating Systems', yearTag: '2nd Yr • Sem 4', attended: 17, total: 24, internal: 21, midterm: 20, assignments: 30 },
-    { code: 'BCS-403', name: 'Database Mgmt. Systems', yearTag: '2nd Yr • Sem 4', attended: 20, total: 25, internal: 25, midterm: 24, assignments: 34 },
-    { code: 'BCS-502', name: 'Computer Networks', yearTag: '3rd Yr • Sem 5', attended: 19, total: 22, internal: 27, midterm: 25, assignments: 36 }
+function createBTechSubjects() {
+  return [
+    { code: 'BCS-301', name: 'Data Structures & Algo', yearTag: '2nd Yr • Sem 3', attended: 0, total: 0, internal: 0, midterm: 0, assignments: 0, todayStatus: null, todayTime: null },
+    { code: 'BCS-302', name: 'Computer Org. & Arch.', yearTag: '2nd Yr • Sem 3', attended: 0, total: 0, internal: 0, midterm: 0, assignments: 0, todayStatus: null, todayTime: null },
+    { code: 'BCS-303', name: 'Discrete Structures', yearTag: '2nd Yr • Sem 3', attended: 0, total: 0, internal: 0, midterm: 0, assignments: 0, todayStatus: null, todayTime: null },
+    { code: 'BAS-303', name: 'Engg. Mathematics-III', yearTag: '2nd Yr • Sem 3', attended: 0, total: 0, internal: 0, midterm: 0, assignments: 0, todayStatus: null, todayTime: null },
+    { code: 'BCS-401', name: 'Operating Systems', yearTag: '2nd Yr • Sem 4', attended: 0, total: 0, internal: 0, midterm: 0, assignments: 0, todayStatus: null, todayTime: null },
+    { code: 'BCS-403', name: 'Database Mgmt. Systems', yearTag: '2nd Yr • Sem 4', attended: 0, total: 0, internal: 0, midterm: 0, assignments: 0, todayStatus: null, todayTime: null },
+    { code: 'BCS-502', name: 'Computer Networks', yearTag: '3rd Yr • Sem 5', attended: 0, total: 0, internal: 0, midterm: 0, assignments: 0, todayStatus: null, todayTime: null }
   ];
-  return base.map((s, i) => {
-    const delta = offsets[i] || 0;
-    return {
-      ...s,
-      attended: Math.max(10, Math.min(s.total, s.attended + delta)),
-      internal: Math.max(15, Math.min(30, s.internal + delta)),
-      todayStatus: null,
-      todayTime: null
-    };
-  });
 }
 
 const DEFAULT_DATA = {
-  updatedAt: Date.now(),
-  syncRoom: 'edupulse-ayush0067-live',
+  updatedAt: 0,
+  syncRoom: 'edupulse-live-ayush0067',
+  firebaseUrl: '',
+  emailjsConfig: { publicKey: '', serviceId: '', templateId: '' },
   lastDate: new Date().toDateString(),
   session: null,
   coordinatorHash: null,
   activeMemberIndex: 0,
   coordinators: [
     {
-      name: 'Dr. S. K. Singh',
+      name: 'Department HOD (Master)',
       id: 'HOD-ADMIN',
       designation: 'Head of Department (HOD)',
       department: 'CSE & AIML',
-      mobile: '9876500001',
+      email: '',
+      mobile: '',
       mobileVerified: true,
-      initials: 'SS',
+      initials: 'HD',
       status: 'approved',
-      registeredAt: 'Master Admin',
+      registeredAt: 'System Master',
       faceRegistered: false,
       facePhoto: null,
       faceDescriptor: null
     }
   ],
-  members: [
-    { name: 'Ayush Kumar Modanwal', id: 'CS-067', mobile: '9876501067', mobileVerified: true, year: 'B.Tech 2nd Year CSE', initials: 'AK', status: 'approved', streak: 12, xp: 1450, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [78, 82, 80, 86, 89, 92], subjects: createBTechSubjects([0, 0, 0, 0, 0, 0, 0]) },
-    { name: 'Priya Sharma', id: 'CS-052', mobile: '9876501052', mobileVerified: true, year: 'B.Tech 2nd Year CSE', initials: 'PS', status: 'approved', streak: 15, xp: 1680, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [84, 86, 88, 90, 91, 94], subjects: createBTechSubjects([2, 3, 1, 2, 4, 2, 1]) },
-    { name: 'Rohan Verma', id: 'CS-041', mobile: '9876501041', mobileVerified: true, year: 'B.Tech 2nd Year CSE', initials: 'RV', status: 'approved', streak: 6, xp: 980, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [70, 72, 69, 74, 76, 79], subjects: createBTechSubjects([-3, -2, -2, -1, 0, -2, -1]) },
-    { name: 'Ananya Singh', id: 'CS-019', mobile: '9876501019', mobileVerified: true, year: 'B.Tech 3rd Year CSE', initials: 'AS', status: 'approved', streak: 18, xp: 1920, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [86, 88, 87, 91, 93, 95], subjects: createBTechSubjects([3, 4, 2, 3, 5, 3, 2]) },
-    { name: 'Vikramaditya Patel', id: 'CS-084', mobile: '9876501084', mobileVerified: true, year: 'B.Tech 3rd Year CSE', initials: 'VP', status: 'approved', streak: 9, xp: 1210, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [74, 77, 75, 80, 82, 84], subjects: createBTechSubjects([-1, 1, 0, -1, 2, 0, 1]) },
-    { name: 'Rahul Yadav', id: 'CS-091', mobile: '9876501091', mobileVerified: true, year: 'B.Tech 2nd Year CSE', initials: 'RY', status: 'pending', registeredAt: 'Just now', streak: 1, xp: 500, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [75, 77, 79, 80, 82, 84], subjects: createBTechSubjects([0, 0, 0, 0, 0, 0, 0]) }
-  ],
+  members: [], // 0 STUDENTS REGISTERED — 100% REAL LIVE REGISTRATIONS ONLY
   questions: getInitialBTechQuestions(),
   rewards: [
     { id: 'r1', icon: '🏅', title: '85% Attendance Badge', desc: 'Exclusive Gold Scholar profile badge', cost: 200, claimed: false },
@@ -62,12 +48,14 @@ const DEFAULT_DATA = {
   ],
   liveLogs: [],
   activities: [
-    { text: 'Ayush Kumar Modanwal (CS-067) verified on Student OS', time: 'Today', tag: 'Student' },
-    { text: 'Rahul Yadav (CS-091) awaiting HOD / Admin Approval', time: 'Today', tag: 'Pending' }
+    { text: 'Live Production Database Initialized — 0 students registered yet', time: 'Live', tag: 'System' }
   ]
 };
 
-function getActiveMember(state) { return state.members[state.activeMemberIndex] || state.members[0]; }
+function getActiveMember(state) {
+  if (!state.members || !state.members.length) return null;
+  return state.members[state.activeMemberIndex] || state.members[0];
+}
 
 function loadState() {
   try {
@@ -77,6 +65,10 @@ function loadState() {
     if (!Array.isArray(parsed.coordinators) || !parsed.coordinators.length) {
       parsed.coordinators = structuredClone(DEFAULT_DATA.coordinators);
     }
+    if (!Array.isArray(parsed.members)) parsed.members = [];
+    if (!parsed.questions || !parsed.questions.length) parsed.questions = getInitialBTechQuestions();
+    if (!parsed.emailjsConfig) parsed.emailjsConfig = { publicKey: '', serviceId: '', templateId: '' };
+
     const today = new Date().toDateString();
     if (parsed.lastDate !== today) {
       parsed.lastDate = today;

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EduPulse Smart OS — Enterprise Biometric & Academic Governance</title>
+  <title>EduPulse Smart OS — Live Biometric & Academic Governance</title>
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -11,47 +11,28 @@
   <div class="ambient-orb orb-1"></div>
   <div class="ambient-orb orb-2"></div>
 
-  <!-- FLOATING LIVE SMARTPHONE SMS GATEWAY RECEIVER -->
-  <div id="live-sms-toast" class="live-sms-toast">
-    <div class="sms-toast-header">
-      <span>📲 LIVE SMS GATEWAY • <span id="sms-toast-to">+91-XXXXXX0000</span></span>
-      <button type="button" onclick="closeLiveSmsToast()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.9rem;">✕</button>
-    </div>
-    <div style="font-size:0.78rem; color:var(--text-muted);" id="sms-toast-purpose">EduPulse Live Security Verification Code:</div>
-    <div class="sms-toast-code" id="sms-toast-code">000000</div>
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:6px;">
-      <button type="button" id="sms-toast-fill-btn" class="btn-primary" style="padding:6px 12px; font-size:0.78rem; flex:1;">
-        ⚡ Auto-Fill 6-Digit OTP
-      </button>
-      <a id="sms-toast-phone-link" href="#" target="_blank" class="btn-outline" style="padding:6px 10px; font-size:0.75rem; text-decoration:none;" title="Open Real-Time Mobile Push Stream">
-        📱 Mobile Feed
-      </a>
-    </div>
-  </div>
-
-  <!-- EXECUTIVE DUAL-GATE AUTHENTICATION & LIVE OTP ONBOARDING -->
+  <!-- EXECUTIVE DUAL-GATE AUTHENTICATION (0 PRE-REGISTERED DUMMY STUDENTS) -->
   <div id="auth-screen" class="auth-screen">
     <div class="auth-card" style="max-width: 520px;">
       <div class="brand" style="margin-bottom: 4px;">
         <div class="brand-icon">EP</div>
         <div>
           <h2>EduPulse Smart OS</h2>
-          <span>Enterprise Biometric Attendance & Academic Governance</span>
+          <span>Real-Time Biometric Attendance & Academic Governance</span>
         </div>
       </div>
 
       <div class="portal-security-strip">
-        <span>🛡️ SHA-256 + 392-D Biometric</span>
-        <span>🟢 Live OTP Gateway Ready</span>
+        <span id="auth-db-badge">🟢 Live Real-Time DB Ready</span>
+        <span id="auth-student-count">0 Students Registered</span>
       </div>
 
-      <!-- EXECUTIVE PORTAL SELECTOR -->
       <div class="portal-role-switch">
         <button type="button" id="gate-student-btn" class="portal-switch-btn active student-mode" onclick="switchPortalGate('student')">
           🎓 Student Portal
         </button>
         <button type="button" id="gate-faculty-btn" class="portal-switch-btn faculty-mode" onclick="switchPortalGate('faculty')">
-          🏛️ Admin / HOD / Coord <span id="login-pending-badge" class="badge badge-amber" style="padding:2px 6px;font-size:0.68rem;">1</span>
+          🏛️ Admin / HOD / Coord <span id="login-pending-badge" class="badge badge-amber" style="display:none;padding:2px 6px;font-size:0.68rem;">0</span>
         </button>
       </div>
 
@@ -60,24 +41,24 @@
       <!-- ================= PORTAL A: STUDENT GATE ================= -->
       <div id="student-gate-container">
         <div class="auth-tabs" style="grid-template-columns: 1fr 1fr;">
-          <button type="button" class="auth-tab-btn active" data-auth-tab="student-login">🔑 Student Sign In</button>
-          <button type="button" class="auth-tab-btn" data-auth-tab="student-register">📝 Student Register</button>
+          <button type="button" class="auth-tab-btn" data-auth-tab="student-login">🔑 Student Sign In</button>
+          <button type="button" class="auth-tab-btn active" data-auth-tab="student-register">📝 New Student Register</button>
         </div>
 
         <!-- STUDENT SIGN IN -->
-        <div id="panel-student-login" class="auth-panel active">
+        <div id="panel-student-login" class="auth-panel">
           <form id="student-login-form">
             <div class="auth-field">
               <div class="auth-field-header"><label>Student Roll ID</label></div>
-              <input type="text" id="login-roll-id" placeholder="e.g. CS-067" required />
+              <input type="text" id="login-roll-id" placeholder="Enter your registered Roll ID" required />
             </div>
             <div class="auth-field">
               <div class="auth-field-header">
                 <label>Password</label>
-                <button type="button" id="open-forgot-btn" class="link-btn">Forgot Password (Live OTP)?</button>
+                <button type="button" id="open-forgot-btn" class="link-btn">Forgot Password (Real OTP)?</button>
               </div>
               <div class="pass-wrap">
-                <input type="password" id="login-password" placeholder="Enter password" required />
+                <input type="password" id="login-password" placeholder="Enter your password" required />
                 <button type="button" class="eye-btn" onclick="togglePasswordField('login-password', this)">👁️</button>
               </div>
             </div>
@@ -90,18 +71,12 @@
 
           <div id="face-login-box" style="display:none; margin-top:12px; text-align:center;">
             <video id="face-login-video" autoplay playsinline muted style="width:100%; border-radius:12px; border:1px solid var(--cyan); transform:scaleX(-1);"></video>
-            <small id="face-login-status" style="color:var(--cyan); display:block; margin-top:6px;">Initializing camera...</small>
-          </div>
-
-          <div class="demo-pills">
-            <span style="font-size:0.74rem; color:var(--text-muted); width:100%;">Quick Student Fill:</span>
-            <button type="button" class="demo-pill" onclick="fillDemoLogin('CS-067','pass123')">Ayush (Approved)</button>
-            <button type="button" class="demo-pill" onclick="fillDemoLogin('CS-091','pass123')">Rahul (Pending Approval)</button>
+            <small id="face-login-status" style="color:var(--cyan); display:block; margin-top:6px;">Initializing biometric camera...</small>
           </div>
         </div>
 
-        <!-- STUDENT SELF-REGISTRATION WITH LIVE MOBILE OTP VERIFICATION -->
-        <div id="panel-student-register" class="auth-panel">
+        <!-- NEW STUDENT LIVE REGISTRATION (REAL PHONE OTP + FACE ID) -->
+        <div id="panel-student-register" class="auth-panel active">
           <form id="student-register-form">
             <div class="auth-field">
               <label>Full Name</label>
@@ -109,37 +84,44 @@
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
               <div class="auth-field">
-                <label>Roll ID</label>
-                <input type="text" id="reg-roll-id" placeholder="e.g. CS-105" required />
+                <label>University Roll ID</label>
+                <input type="text" id="reg-roll-id" placeholder="e.g. 2401640100067" required />
               </div>
               <div class="auth-field">
                 <label>B.Tech Year</label>
                 <select id="reg-year">
                   <option value="B.Tech 2nd Year CSE">2nd Year CSE</option>
                   <option value="B.Tech 3rd Year CSE">3rd Year CSE</option>
+                  <option value="B.Tech 1st Year CSE">1st Year CSE</option>
+                  <option value="B.Tech 4th Year CSE">4th Year CSE</option>
                 </select>
               </div>
             </div>
 
-            <!-- Live Mobile OTP Verification inside Student Registration -->
+            <div class="auth-field">
+              <label>Email Address (For Real Email OTP Delivery)</label>
+              <input type="email" id="reg-email" placeholder="yourname@gmail.com" required />
+            </div>
+
             <div class="auth-field">
               <div class="auth-field-header">
-                <label>Mobile Number (+91) — Live OTP Required</label>
+                <label>Real Mobile Number (+91) — Live Phone OTP Required</label>
                 <span id="reg-otp-badge" class="badge badge-amber" style="font-size:0.68rem;">Unverified</span>
               </div>
               <div style="display:flex; gap:8px;">
                 <span style="background:var(--bg-panel); border:1px solid var(--border); padding:10px 10px; border-radius:10px; color:var(--cyan); font-weight:600; font-size:0.86rem;">+91</span>
-                <input type="tel" id="reg-mobile" placeholder="10-digit mobile" maxlength="10" pattern="[0-9]{10}" required />
+                <input type="tel" id="reg-mobile" placeholder="Your real 10-digit mobile" maxlength="10" pattern="[0-9]{10}" required />
                 <button type="button" id="reg-send-otp-btn" class="btn-outline" style="white-space:nowrap;">Send Live OTP</button>
               </div>
             </div>
 
-            <div id="reg-otp-section" style="display:none; background:rgba(34,211,238,0.06); border:1px solid rgba(34,211,238,0.28); padding:10px; border-radius:12px; margin-bottom:12px;">
+            <div id="reg-otp-section" style="display:none; background:rgba(34,211,238,0.06); border:1px solid rgba(34,211,238,0.28); padding:11px; border-radius:12px; margin-bottom:12px;">
               <div style="display:flex; justify-content:space-between; font-size:0.76rem; color:var(--cyan);">
-                <span>Enter 6-Digit Live OTP</span>
+                <span>Enter 6-Digit OTP Sent to Your Phone</span>
                 <span id="reg-otp-timer">60s</span>
               </div>
               <div id="reg-otp-boxes" class="otp-grid-6"></div>
+              <div id="reg-otp-channel-hint" style="font-size:0.72rem; color:var(--text-muted); margin-top:6px; line-height:1.4;"></div>
             </div>
 
             <div class="auth-field">
@@ -151,12 +133,12 @@
             </div>
 
             <div class="auth-field" style="display:flex; align-items:center; gap:10px;">
-              <button type="button" id="reg-capture-face-btn" class="btn-outline" style="flex:1;">📷 Optional: Capture Face ID</button>
-              <img id="reg-face-preview" style="display:none; width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--green);" alt="Preview" />
+              <button type="button" id="reg-capture-face-btn" class="btn-outline" style="flex:1;">📷 Capture Live Face ID</button>
+              <img id="reg-face-preview" style="display:none; width:42px; height:42px; border-radius:50%; object-fit:cover; border:2px solid var(--green);" alt="Preview" />
             </div>
             <video id="reg-video" autoplay playsinline muted style="display:none; width:100%; border-radius:10px; margin-bottom:10px; transform:scaleX(-1);"></video>
 
-            <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Submit Verified Registration ✓</button>
+            <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Submit Live Registration for HOD Approval ✓</button>
           </form>
         </div>
       </div>
@@ -177,15 +159,15 @@
           <form id="coordinator-login-form">
             <div class="auth-field">
               <label>Admin / HOD / Coordinator ID</label>
-              <input type="text" id="coord-id" placeholder="e.g. HOD-ADMIN or ADMIN-02" required />
+              <input type="text" id="coord-id" placeholder="HOD-ADMIN or your Faculty ID" required />
             </div>
             <div class="auth-field">
               <div class="auth-field-header">
                 <label>Executive Password</label>
-                <button type="button" id="open-fac-forgot-btn" class="link-btn">Forgot Password (Live OTP)?</button>
+                <button type="button" id="open-fac-forgot-btn" class="link-btn">Forgot Password (Real OTP)?</button>
               </div>
               <div class="pass-wrap">
-                <input type="password" id="coord-password" placeholder="Enter admin password" required />
+                <input type="password" id="coord-password" placeholder="Enter executive password" required />
                 <button type="button" class="eye-btn" onclick="togglePasswordField('coord-password', this)">👁️</button>
               </div>
             </div>
@@ -200,24 +182,22 @@
             <video id="faculty-face-video" autoplay playsinline muted style="width:100%; border-radius:12px; border:1px solid var(--amber); transform:scaleX(-1);"></video>
             <small id="faculty-face-status" style="color:var(--amber); display:block; margin-top:6px;">Scanning Admin/HOD biometric...</small>
           </div>
-
-          <div class="demo-pills">
-            <button type="button" class="demo-pill" onclick="fillCoordinatorDemo()">Auto-Fill Master HOD (HOD-ADMIN / admin123)</button>
-          </div>
+          <small style="display:block; margin-top:12px; color:var(--text-muted); font-size:0.74rem; text-align:center;">
+            Initial Institutional Admin ID: <strong>HOD-ADMIN</strong> (Default Key: <strong>admin123</strong>)
+          </small>
         </div>
 
-        <!-- ADMIN / HOD / COORDINATOR REGISTRATION WITH LIVE OTP + LIVE BIOMETRIC PHOTO -->
+        <!-- ADMIN / HOD REGISTRATION WITH REAL PHONE OTP + LIVE PHOTO -->
         <div id="panel-coordinator-register" class="auth-panel">
           <form id="coordinator-register-form">
             <div class="auth-field">
               <label>Admin / HOD Full Name & Title</label>
               <input type="text" id="fac-reg-name" placeholder="e.g. Dr. Rajesh Verma" required />
             </div>
-
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
               <div class="auth-field">
                 <label>Admin / Employee ID</label>
-                <input type="text" id="fac-reg-id" placeholder="e.g. HOD-CSE-02" required />
+                <input type="text" id="fac-reg-id" placeholder="e.g. HOD-CSE-01" required />
               </div>
               <div class="auth-field">
                 <label>Executive Role</label>
@@ -246,25 +226,30 @@
               </div>
             </div>
 
-            <!-- Live Mobile OTP Verification inside Admin/HOD Registration -->
+            <div class="auth-field">
+              <label>Official Email Address</label>
+              <input type="email" id="fac-reg-email" placeholder="hod@college.edu" required />
+            </div>
+
             <div class="auth-field">
               <div class="auth-field-header">
-                <label>Official Mobile (+91) — Live OTP Verification</label>
+                <label>Official Mobile (+91) — Real Phone OTP Required</label>
                 <span id="fac-otp-badge" class="badge badge-amber" style="font-size:0.68rem;">Unverified</span>
               </div>
               <div style="display:flex; gap:8px;">
                 <span style="background:var(--bg-panel); border:1px solid var(--border); padding:10px 10px; border-radius:10px; color:var(--amber); font-weight:600; font-size:0.86rem;">+91</span>
-                <input type="tel" id="fac-reg-mobile" placeholder="10-digit mobile" maxlength="10" pattern="[0-9]{10}" required />
+                <input type="tel" id="fac-reg-mobile" placeholder="Real 10-digit mobile" maxlength="10" pattern="[0-9]{10}" required />
                 <button type="button" id="fac-send-otp-btn" class="btn-outline" style="white-space:nowrap;">Send Live OTP</button>
               </div>
             </div>
 
-            <div id="fac-otp-section" style="display:none; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.35); padding:10px; border-radius:12px; margin-bottom:12px;">
+            <div id="fac-otp-section" style="display:none; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.35); padding:11px; border-radius:12px; margin-bottom:12px;">
               <div style="display:flex; justify-content:space-between; font-size:0.76rem; color:var(--amber);">
-                <span>Enter 6-Digit Admin Verification OTP</span>
+                <span>Enter 6-Digit OTP Sent to Your Phone</span>
                 <span id="fac-otp-timer">60s</span>
               </div>
               <div id="fac-otp-boxes" class="otp-grid-6"></div>
+              <div id="fac-otp-channel-hint" style="font-size:0.72rem; color:var(--text-muted); margin-top:6px; line-height:1.4;"></div>
             </div>
 
             <div class="auth-field">
@@ -275,15 +260,12 @@
               </div>
             </div>
 
-            <!-- Mandatory Live Picture Verification -->
             <div class="auth-field" style="background:rgba(255,255,255,0.03); border:1px dashed rgba(245,158,11,0.45); padding:10px; border-radius:12px;">
               <label style="color:var(--amber); font-weight:600; margin-bottom:6px;">
                 🪪 Mandatory Live Picture Verification (Capture or Upload)
               </label>
               <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                <button type="button" id="fac-cam-capture-btn" class="btn-outline" style="flex:1; font-size:0.8rem;">
-                  📷 Capture Live Picture
-                </button>
+                <button type="button" id="fac-cam-capture-btn" class="btn-outline" style="flex:1; font-size:0.8rem;">📷 Capture Live Picture</button>
                 <label class="btn-outline" style="flex:1; text-align:center; cursor:pointer; font-size:0.8rem;">
                   📁 Upload Live Photo
                   <input type="file" id="fac-photo-upload" accept="image/*" style="display:none;" />
@@ -291,28 +273,24 @@
                 <img id="fac-reg-preview" style="display:none; width:46px; height:46px; border-radius:50%; object-fit:cover; border:2px solid var(--green);" alt="Verified Face" />
               </div>
               <video id="fac-reg-video" autoplay playsinline muted style="display:none; width:100%; border-radius:10px; margin-top:8px; transform:scaleX(-1);"></video>
-              <small id="fac-photo-status" style="color:var(--text-muted); display:block; margin-top:5px;">
-                No live verification picture captured yet.
-              </small>
+              <small id="fac-photo-status" style="color:var(--text-muted); display:block; margin-top:5px;">No live verification picture captured yet.</small>
             </div>
 
-            <button type="submit" class="btn-primary" style="width:100%; padding:11px;">
-              Register Admin / HOD Account ✓
-            </button>
+            <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Register Admin / HOD Account ✓</button>
           </form>
         </div>
       </div>
 
-      <!-- ================= UNIFIED 3-STAGE LIVE SMS OTP PASSWORD RECOVERY ================= -->
+      <!-- ================= UNIFIED 3-STAGE REAL PHONE OTP PASSWORD RECOVERY ================= -->
       <div id="panel-forgot-password" class="auth-panel">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <strong style="font-size:0.98rem;">📲 Live SMS OTP Password Recovery</strong>
+          <strong style="font-size:0.98rem;">📲 Real Phone OTP Password Recovery</strong>
           <button type="button" id="back-to-login-btn" class="link-btn">← Back to Sign In</button>
         </div>
 
         <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:14px; text-align:center; font-size:0.74rem;">
           <div id="pipe-step-1" class="badge badge-cyan" style="padding:6px 4px;">1. Identity & Mobile</div>
-          <div id="pipe-step-2" class="badge" style="padding:6px 4px; background:rgba(255,255,255,0.05); color:var(--text-muted);">2. Live 6-Digit OTP</div>
+          <div id="pipe-step-2" class="badge" style="padding:6px 4px; background:rgba(255,255,255,0.05); color:var(--text-muted);">2. Real Phone OTP</div>
           <div id="pipe-step-3" class="badge" style="padding:6px 4px; background:rgba(255,255,255,0.05); color:var(--text-muted);">3. New Password</div>
         </div>
 
@@ -327,11 +305,8 @@
                 </select>
               </div>
               <div class="auth-field">
-                <div class="auth-field-header">
-                  <label>Roll / Admin ID</label>
-                  <button type="button" class="link-btn" onclick="autoFillForgotDemo()">Auto-Fill</button>
-                </div>
-                <input type="text" id="forgot-roll-id" placeholder="e.g. CS-067" required />
+                <label>Registered Roll / Admin ID</label>
+                <input type="text" id="forgot-roll-id" placeholder="Enter your registered ID" required />
               </div>
             </div>
 
@@ -339,21 +314,22 @@
               <label>Registered Mobile Number (+91)</label>
               <div style="display:flex; gap:8px;">
                 <span style="background:var(--bg-panel); border:1px solid var(--border); padding:10px 11px; border-radius:10px; color:var(--cyan); font-weight:600; font-size:0.88rem;">+91</span>
-                <input type="tel" id="forgot-mobile-input" placeholder="10-digit mobile number" maxlength="10" pattern="[0-9]{10}" required />
+                <input type="tel" id="forgot-mobile-input" placeholder="10-digit registered mobile" maxlength="10" pattern="[0-9]{10}" required />
               </div>
             </div>
 
             <button type="button" id="send-otp-btn" class="btn-primary" style="width:100%; padding:10px;">
-              📲 Dispatch Live 6-Digit SMS OTP
+              📲 Dispatch Real 6-Digit OTP to Phone
             </button>
           </div>
 
           <div id="forgot-stage-2" style="display:none; margin-top:14px; background:rgba(34,211,238,0.06); border:1px solid rgba(34,211,238,0.28); padding:12px; border-radius:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem;">
-              <span style="color:var(--cyan); font-weight:600;">Enter 6-Digit Live OTP</span>
+              <span style="color:var(--cyan); font-weight:600;">Enter 6-Digit OTP Received on Phone</span>
               <span id="otp-timer-text" style="color:var(--amber); font-family:'JetBrains Mono',monospace;">Valid: 60s</span>
             </div>
             <div id="forgot-otp-boxes" class="otp-grid-6"></div>
+            <div id="forgot-otp-channel-hint" style="font-size:0.72rem; color:var(--text-muted); margin-top:6px; line-height:1.4;"></div>
             <div style="display:flex; gap:8px; margin-top:8px;">
               <button type="button" id="verify-otp-btn" class="btn-primary" style="flex:1; padding:8px;">Verify OTP ✓</button>
               <button type="button" id="resend-otp-btn" class="btn-outline" style="padding:8px 12px;">Resend</button>
@@ -395,7 +371,10 @@
       <nav class="nav-menu">
         <!-- DEDICATED ADMIN / HOD / COORDINATOR NAVIGATION -->
         <button class="nav-btn hod-only active" id="nav-coordinator-btn" data-view="coordinator" onclick="scrollToHodSection('hod-approvals-section')">
-          🛡️ Student Approvals <span id="coord-pending-badge" class="badge badge-amber" style="margin-left:6px;">1</span>
+          🛡️ Student Approvals <span id="coord-pending-badge" class="badge badge-amber" style="display:none;margin-left:6px;">0</span>
+        </button>
+        <button class="nav-btn hod-only" data-view="coordinator" onclick="scrollToHodSection('hod-cloud-config-section')">
+          ☁️ Live DB & OTP Setup
         </button>
         <button class="nav-btn hod-only" data-view="coordinator" onclick="scrollToHodSection('hod-faculty-section')">
           🏛️ Admin & HOD Registry
@@ -424,8 +403,8 @@
         <div class="streak-mini" id="sidebar-streak-box">
           <span class="streak-fire" id="sidebar-footer-icon">🔥</span>
           <div>
-            <strong id="sidebar-streak">12 Day Streak</strong>
-            <small id="sidebar-xp">1,450 XP</small>
+            <strong id="sidebar-streak">1 Day Streak</strong>
+            <small id="sidebar-xp">0 XP</small>
           </div>
         </div>
       </div>
@@ -439,14 +418,14 @@
         </div>
 
         <div class="topbar-actions">
-          <div class="xp-pill student-only" id="top-xp-pill">⚡ <span id="top-xp">1,450</span> XP</div>
+          <div class="xp-pill student-only" id="top-xp-pill">⚡ <span id="top-xp">0</span> XP</div>
 
           <div class="profile-chip" id="top-profile-chip">
             <img id="top-face-thumb" class="avatar-img" style="display:none;" alt="Face" />
-            <div id="top-avatar-initials" class="avatar">AK</div>
+            <div id="top-avatar-initials" class="avatar">--</div>
             <div>
-              <strong id="student-name">Ayush Kumar Modanwal</strong>
-              <small id="student-id">ID: CS-067</small>
+              <strong id="student-name">Not Signed In</strong>
+              <small id="student-id">ID: --</small>
             </div>
           </div>
 
@@ -465,16 +444,16 @@
           <div class="kpi-card purple">
             <span class="kpi-label">Current CGPA</span>
             <h3 id="kpi-cgpa">0.0</h3>
-            <small id="kpi-year-tag">B.Tech 2nd Year CSE</small>
+            <small id="kpi-year-tag">B.Tech CSE</small>
           </div>
           <div class="kpi-card green">
             <span class="kpi-label">Reward Points</span>
             <h3 id="kpi-xp">0 XP</h3>
-            <small id="kpi-rank">Rank: Gold Scholar</small>
+            <small id="kpi-rank">Rank: Rising Scholar</small>
           </div>
           <div class="kpi-card amber">
             <span class="kpi-label">Registered Faces</span>
-            <h3 id="kpi-faces">0 / 6</h3>
+            <h3 id="kpi-faces">0 / 0</h3>
             <small>Biometric roster status</small>
           </div>
         </div>
@@ -514,7 +493,7 @@
       <section id="view-attendance" class="view student-only">
         <div class="section-toolbar">
           <p>Once marked for today, attendance is <strong>permanently locked (Cannot Reverse)</strong>. Earn <strong>+25 XP</strong> per class.</p>
-          <button id="reset-demo-btn" class="btn-outline">Reset Demo Data</button>
+          <button id="reset-demo-btn" class="btn-outline" style="display:none;">Reset</button>
         </div>
         <div id="attendance-cards-grid" class="subject-grid"></div>
       </section>
@@ -564,13 +543,13 @@
           <div>
             <div class="glass-card">
               <div class="card-header">
-                <h3>👥 Batch Members & Face Registry (<span id="roster-count">6</span>)</h3>
-                <button id="toggle-add-member-btn" class="btn-outline hod-only">+ Add Member</button>
+                <h3>👥 Registered Students & Face Registry (<span id="roster-count">0</span>)</h3>
+                <button id="toggle-add-member-btn" class="btn-outline hod-only">+ Add Student</button>
               </div>
 
               <form id="add-member-form" style="display:none; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
                 <input type="text" id="new-member-name" placeholder="Full Name" required class="select-input" style="flex:1;" />
-                <input type="text" id="new-member-id" placeholder="Roll ID (e.g. CS-099)" required class="select-input" style="width:120px;" />
+                <input type="text" id="new-member-id" placeholder="Roll ID" required class="select-input" style="width:120px;" />
                 <input type="tel" id="new-member-mobile" placeholder="10-digit Mobile" maxlength="10" required class="select-input" style="width:130px;" />
                 <select id="new-member-year" class="select-input">
                   <option value="B.Tech 2nd Year CSE">2nd Year</option>
@@ -647,7 +626,7 @@
       <section id="view-solver" class="view student-only">
         <div class="section-toolbar">
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-            <span id="solver-progress-badge" class="badge badge-cyan">0 / 80 Locked</span>
+            <span id="solver-progress-badge" class="badge badge-cyan">0 / 32 Locked</span>
             <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; cursor:pointer;">
               <input type="checkbox" id="auto-next-toggle" checked /> Auto-Next Question
             </label>
@@ -694,7 +673,6 @@
           </div>
 
           <div class="bot-chips">
-            <button type="button" class="bot-chip" data-prompt="Analyze my weakest subject and give a 3-step study plan">🎯 Weak Subject Plan</button>
             <button type="button" class="bot-chip" data-prompt="Explain OS Deadlocks & Coffman conditions with example">⚙️ OS Deadlocks</button>
             <button type="button" class="bot-chip" data-prompt="Explain DBMS Normalization 1NF, 2NF, 3NF and BCNF simply">🗄️ DBMS Normalization</button>
             <button type="button" class="bot-chip" data-prompt="Explain Dijkstra's shortest path algorithm step by step">🌲 Dijkstra's Algorithm</button>
@@ -704,7 +682,7 @@
           <div id="bot-messages" class="bot-messages"></div>
 
           <form id="bot-chat-form" class="bot-input-row">
-            <input type="text" id="bot-user-input" placeholder="Ask ANY question online (e.g., Write C++ code for Merge Sort, Explain Fourier Series)..." autocomplete="off" />
+            <input type="text" id="bot-user-input" placeholder="Ask ANY question online..." autocomplete="off" />
             <button type="submit" class="btn-primary">Ask Live AI ➤</button>
           </form>
         </div>
@@ -720,8 +698,8 @@
           </div>
           <div class="kpi-card amber">
             <span class="kpi-label">Attendance Streak</span>
-            <h3 id="rewards-streak">12 Days</h3>
-            <small>Next milestone: 15 Days (+200 XP)</small>
+            <h3 id="rewards-streak">1 Day</h3>
+            <small>Keep attending to grow your streak</small>
           </div>
         </div>
 
@@ -737,17 +715,16 @@
           <div class="card-header" style="margin-bottom: 8px;">
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
               <h3><span class="live-dot" style="background:var(--green);"></span>Admin, HOD & Coordinator Governance Portal</h3>
-              <span id="live-db-status-badge" class="badge badge-green">🟢 Real-Time DB Synced</span>
+              <span id="live-db-status-badge" class="badge badge-green">🟢 Real-Time Listener Active</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-              <input type="text" id="sync-room-input" class="select-input" style="width:185px; font-family:'JetBrains Mono',monospace; font-size:0.78rem;" title="Live Sync Room ID" />
-              <button type="button" id="apply-sync-room-btn" class="btn-outline" style="font-size:0.8rem;">Connect</button>
+              <button type="button" id="copy-live-student-link-btn" class="btn-outline" style="font-size:0.8rem;">🔗 Copy Live Student Link</button>
               <button type="button" id="force-sync-now-btn" class="btn-outline" style="font-size:0.8rem;">🔄 Sync Now</button>
               <button type="button" id="hod-export-report-btn" class="btn-primary" style="font-size:0.82rem;">📊 Export HOD Report</button>
             </div>
           </div>
           <small id="live-sync-timestamp" style="color:var(--text-muted); font-family:'JetBrains Mono',monospace;">
-            Dedicated Admin & Faculty Workspace — Approving OTP-verified registrations, verifying live photos & auditing attendance...
+            Waiting for live student registrations... All approvals & edits sync across devices in real time.
           </small>
         </div>
 
@@ -755,17 +732,17 @@
           <div class="kpi-card amber">
             <span class="kpi-label">Pending Approvals</span>
             <h3 id="coord-kpi-pending">0</h3>
-            <small>Students & Admins awaiting verification</small>
+            <small>Students & Admins awaiting sign-off</small>
           </div>
           <div class="kpi-card green">
             <span class="kpi-label">Approved Students</span>
             <h3 id="coord-kpi-approved">0</h3>
-            <small>Active student accounts</small>
+            <small>Verified real registrations</small>
           </div>
           <div class="kpi-card cyan">
             <span class="kpi-label">Dept Avg Attendance</span>
             <h3 id="coord-kpi-avg-att">0%</h3>
-            <small>Across all B.Tech CSE sections</small>
+            <small>Live computed average</small>
           </div>
           <div class="kpi-card purple">
             <span class="kpi-label">Defaulters (&lt;75%)</span>
@@ -774,12 +751,12 @@
           </div>
         </div>
 
-        <!-- SECTION A: PENDING STUDENT APPROVAL QUEUE -->
+        <!-- SECTION A: REAL-TIME PENDING APPROVAL QUEUE -->
         <div class="glass-card" id="hod-approvals-section" style="border-color: rgba(245, 158, 11, 0.35);">
           <div class="card-header">
             <div>
-              <h3>⏳ Pending Student Self-Registrations (Approve / Reject in Real Time)</h3>
-              <small style="color:var(--text-muted);">OTP-verified student accounts awaiting HOD or Admin sign-off</small>
+              <h3>⏳ Pending Student Self-Registrations (Live Queue)</h3>
+              <small style="color:var(--text-muted);">New students registering from phones or laptops appear here in real time</small>
             </div>
             <button type="button" id="approve-all-pending-btn" class="btn-primary" onclick="approveAllPending()">✅ Approve All Pending</button>
           </div>
@@ -790,7 +767,7 @@
                   <th>Face</th>
                   <th>Student Name</th>
                   <th>Roll ID</th>
-                  <th>Verified Mobile</th>
+                  <th>Verified Mobile & Email</th>
                   <th>Program</th>
                   <th>Admin / HOD Decision</th>
                 </tr>
@@ -800,11 +777,50 @@
           </div>
         </div>
 
-        <!-- SECTION B: REGISTERED ADMINS, HODs & COORDINATORS -->
-        <div class="glass-card" id="hod-faculty-section" style="border-color: rgba(34, 211, 238, 0.3);">
+        <!-- SECTION B: REAL-TIME CLOUD DATABASE (FIREBASE) & REAL EMAIL OTP GATEWAY SETUP -->
+        <div class="glass-card" id="hod-cloud-config-section" style="border-color: rgba(34, 211, 238, 0.35);">
           <div class="card-header">
             <div>
-              <h3>🏛️ Registered Admins, HODs & Class Coordinators (Live Photo & OTP Verified)</h3>
+              <h3>☁️ Live Cloud Database (Firebase) & Real Email OTP Gateway</h3>
+              <small style="color:var(--text-muted);">Connect a free Firebase Realtime DB URL for permanent cross-phone sync, and optional EmailJS for Gmail OTPs</small>
+            </div>
+            <span id="cloud-conn-pill" class="badge badge-cyan">Live Relay Mode</span>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px;">
+            <div>
+              <label style="font-size:0.76rem; color:var(--text-muted); display:block; margin-bottom:4px;">Firebase Realtime DB URL (e.g. https://your-app-default-rtdb.firebaseio.com)</label>
+              <input type="url" id="cfg-firebase-url" class="select-input" style="width:100%;" placeholder="https://...-default-rtdb.firebaseio.com" />
+            </div>
+            <div>
+              <label style="font-size:0.76rem; color:var(--text-muted); display:block; margin-bottom:4px;">Shared Live Sync Room ID</label>
+              <input type="text" id="sync-room-input" class="select-input" style="width:100%; font-family:'JetBrains Mono',monospace;" />
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:10px;">
+            <div>
+              <label style="font-size:0.74rem; color:var(--text-muted); display:block; margin-bottom:4px;">EmailJS Public Key (Optional Gmail OTP)</label>
+              <input type="text" id="cfg-ejs-pub" class="select-input" style="width:100%;" placeholder="EmailJS Public Key" />
+            </div>
+            <div>
+              <label style="font-size:0.74rem; color:var(--text-muted); display:block; margin-bottom:4px;">EmailJS Service ID</label>
+              <input type="text" id="cfg-ejs-svc" class="select-input" style="width:100%;" placeholder="service_xxxxxx" />
+            </div>
+            <div>
+              <label style="font-size:0.74rem; color:var(--text-muted); display:block; margin-bottom:4px;">EmailJS Template ID</label>
+              <input type="text" id="cfg-ejs-tpl" class="select-input" style="width:100%;" placeholder="template_xxxxxx" />
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+            <button type="button" id="save-cloud-config-btn" class="btn-primary">💾 Save & Connect Live Cloud</button>
+            <button type="button" id="wipe-all-students-btn" class="btn-outline" style="border-color:var(--red); color:var(--red);">🗑️ Clear All Students (Reset to 0)</button>
+          </div>
+        </div>
+
+        <!-- SECTION C: REGISTERED ADMINS, HODs & COORDINATORS -->
+        <div class="glass-card" id="hod-faculty-section">
+          <div class="card-header">
+            <div>
+              <h3>🏛️ Registered Admins, HODs & Class Coordinators</h3>
               <small style="color:var(--text-muted);">Verify live biometric photos and manage executive portal access</small>
             </div>
             <span class="badge badge-cyan" id="faculty-count-badge">1 Active Admin</span>
@@ -827,7 +843,7 @@
           </div>
         </div>
 
-        <!-- SECTION C: DEFAULTERS WATCHLIST (<75%) & BIOMETRIC AUDIT FEED -->
+        <!-- SECTION D: DEFAULTERS WATCHLIST & BIOMETRIC AUDIT FEED -->
         <div class="bottom-grid" id="hod-defaulters-section">
           <div class="glass-card">
             <div class="card-header">
@@ -837,11 +853,7 @@
             <div class="table-wrap" style="max-height: 230px; overflow-y: auto;">
               <table class="data-table">
                 <thead>
-                  <tr>
-                    <th>Student</th>
-                    <th>Overall Att %</th>
-                    <th>Shortage Guidance</th>
-                  </tr>
+                  <tr><th>Student</th><th>Overall Att %</th><th>Shortage Guidance</th></tr>
                 </thead>
                 <tbody id="hod-defaulters-body"></tbody>
               </table>
@@ -856,12 +868,7 @@
             <div class="table-wrap" style="max-height: 230px; overflow-y: auto;">
               <table class="data-table">
                 <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Student</th>
-                    <th>Lecture</th>
-                    <th>Confidence</th>
-                  </tr>
+                  <tr><th>Time</th><th>Student</th><th>Lecture</th><th>Confidence</th></tr>
                 </thead>
                 <tbody id="hod-live-audit-body"></tbody>
               </table>
@@ -869,11 +876,11 @@
           </div>
         </div>
 
-        <!-- SECTION D: COMPLETE LIVE STUDENT DATABASE & INLINE EDITOR -->
+        <!-- SECTION E: COMPLETE LIVE STUDENT DATABASE & INLINE EDITOR -->
         <div class="glass-card" id="hod-database-section">
           <div class="card-header">
             <div>
-              <h3>🗄️ Complete Batch Student Registry & Live Record Editor</h3>
+              <h3>🗄️ Live Student Database & Record Editor</h3>
               <small style="color:var(--text-muted);">Search, filter, edit details, reset passwords, or toggle approval status live</small>
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -892,7 +899,7 @@
                 <tr>
                   <th>Roll ID</th>
                   <th>Full Name</th>
-                  <th>Mobile (+91)</th>
+                  <th>Mobile & Email</th>
                   <th>Program / Year</th>
                   <th>Status</th>
                   <th>Att % / CGPA</th>

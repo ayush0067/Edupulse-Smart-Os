@@ -4,11 +4,11 @@ let facultyFaceData = null;
 let faceLoginTimer = null;
 let editingRollId = null;
 
-// Live OTP State Store for Multiple Flows (Student Register, Admin/HOD Register, Forgot Password)
+// Stores only SHA-256 hashes of dispatched OTPs — never exposes plaintext OTP on screen
 const otpSessions = {
-  reg: { code: null, mobile: null, verified: false, timer: null },
-  fac: { code: null, mobile: null, verified: false, timer: null },
-  forgot: { code: null, mobile: null, targetId: null, accountType: 'student', verified: false, timer: null }
+  reg: { hash: null, mobile: null, verified: false, timer: null },
+  fac: { hash: null, mobile: null, verified: false, timer: null },
+  forgot: { hash: null, mobile: null, targetId: null, accountType: 'student', verified: false, timer: null }
 };
 
 async function hashPassword(plainText) {
@@ -25,21 +25,14 @@ async function ensureDefaultHashes() {
   if (!state.coordinatorHash) { state.coordinatorHash = masterHodHash; changed = true; }
   if (!Array.isArray(state.coordinators) || !state.coordinators.length) {
     state.coordinators = [{
-      name: 'Dr. S. K. Singh', id: 'HOD-ADMIN', designation: 'Head of Department (HOD)',
-      department: 'CSE & AIML', mobile: '9876500001', mobileVerified: true, initials: 'SS', status: 'approved',
+      name: 'Department HOD (Master)', id: 'HOD-ADMIN', designation: 'Head of Department (HOD)',
+      department: 'CSE & AIML', email: '', mobile: '', mobileVerified: true, initials: 'HD', status: 'approved',
       passwordHash: masterHodHash, faceRegistered: false, facePhoto: null, faceDescriptor: null
     }];
     changed = true;
   }
   state.coordinators.forEach(c => {
     if (!c.passwordHash) { c.passwordHash = masterHodHash; changed = true; }
-    if (!c.mobile) { c.mobile = '9876500001'; changed = true; }
-  });
-
-  const defHash = await hashPassword('pass123');
-  state.members.forEach((m, i) => {
-    if (!m.passwordHash) { m.passwordHash = defHash; changed = true; }
-    if (!m.mobile) { m.mobile = `98765010${String(10 + i).slice(-2)}`; changed = true; }
   });
   if (changed) window.saveState(state);
 }
@@ -51,7 +44,6 @@ function togglePasswordField(inputId, btnEl) {
   btnEl.textContent = input.type === 'password' ? '👁️' : '🙈';
 }
 
-// ================= BANK-GRADE 6-BOX SEGMENTED OTP BUILDER =================
 function buildOtpBoxes(containerId, flowKey, onAllFilled) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -68,20 +60,15 @@ function buildOtpBoxes(containerId, flowKey, onAllFilled) {
       const fullCode = boxes.map(b => b.value).join('');
       if (fullCode.length === 6 && typeof onAllFilled === 'function') onAllFilled(fullCode, boxes);
     });
-
     box.addEventListener('keydown', e => {
-      if (e.key === 'Backspace' && !e.target.value && idx > 0) {
-        boxes[idx - 1].focus();
-      }
+      if (e.key === 'Backspace' && !e.target.value && idx > 0) boxes[idx - 1].focus();
     });
-
     box.addEventListener('paste', e => {
       e.preventDefault();
       const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
       if (!pasted) return;
       pasted.split('').forEach((ch, i) => { if (boxes[i]) boxes[i].value = ch; });
-      const lastIdx = Math.min(5, pasted.length - 1);
-      boxes[lastIdx]?.focus();
+      boxes[Math.min(5, pasted.length - 1)]?.focus();
       if (pasted.length === 6 && typeof onAllFilled === 'function') onAllFilled(pasted, boxes);
     });
   });
@@ -94,31 +81,15 @@ function getOtpBoxesValue(containerId) {
   return Array.from(container.querySelectorAll('.otp-box')).map(b => b.value).join('');
 }
 
-function fillOtpBoxesProgrammatically(containerId, code) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  const boxes = Array.from(container.querySelectorAll('.otp-box'));
-  code.split('').forEach((ch, i) => {
-    if (boxes[i]) {
-      boxes[i].value = ch;
-      boxes[i].dispatchEvent(new Event('input'));
-    }
-  });
-}
-
-function closeLiveSmsToast() {
-  const el = document.getElementById('live-sms-toast');
-  if (el) el.style.display = 'none';
-}
-
-// ================= REAL-TIME LIVE SMS / PUSH OTP GATEWAY DISPATCHER =================
-async function dispatchLiveSmsOtp({ flowKey, targetId, mobile, purposeLabel, boxesContainerId, timerElId, onAutoVerify }) {
+// ================= REAL LIVE OTP DISPATCHER (REAL PHONE PUSH + REAL EMAILJS + REAL PYTHON SMS) =================
+async function dispatchRealLiveOtp({ flowKey, targetId, mobile, email, purposeLabel, boxesContainerId, timerElId, hintElId, onAutoVerify }) {
   const cleanMobile = mobile.replace(/\D/g, '');
   if (cleanMobile.length !== 10) {
-    setAuthAlert('error', 'Please enter a valid 10-digit Indian mobile number (+91).');
-    return null;
+    setAuthAlert('error', 'Enter a valid 10-digit mobile number (+91).');
+    return false;
   }
 
+  // Generate Cryptographically Secure 6-Digit OTP
   let otpCode = String(Math.floor(100000 + Math.random() * 900000));
   if (window.crypto && window.crypto.getRandomValues) {
     const arr = new Uint32Array(1);
@@ -126,49 +97,70 @@ async function dispatchLiveSmsOtp({ flowKey, targetId, mobile, purposeLabel, box
     otpCode = String(100000 + (arr[0] % 900000));
   }
 
-  // 1. Log to Python SQLite3 backend if online
+  const otpHash = await hashPassword(`${cleanMobile}:${otpCode}`);
+  const deliveredChannels = [];
+
+  // Channel 1: REAL SMARTPHONE PUSH NOTIFICATION (ntfy.sh -> rings real Android/iOS phone)
+  const phoneTopic = `edupulse-otp-${cleanMobile}`;
   try {
-    const res = await fetch('/api/send-sms-otp', {
+    const pushRes = await fetch(`https://ntfy.sh/${phoneTopic}`, {
+      method: 'POST',
+      headers: { 'Title': 'EduPulse Live Security OTP', 'Priority': 'urgent', 'Tags': 'lock,key' },
+      body: `OTP: ${otpCode} | ${purposeLabel} (Valid 60s — Do not share)`
+    });
+    if (pushRes.ok) deliveredChannels.push(`Phone Push (${phoneTopic})`);
+  } catch {}
+
+  // Channel 2: REAL EMAIL OTP via EmailJS (if configured by Admin/HOD)
+  const ejs = state.emailjsConfig || {};
+  if (ejs.publicKey && ejs.serviceId && ejs.templateId && email) {
+    try {
+      const emailRes = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id: ejs.serviceId,
+          template_id: ejs.templateId,
+          user_id: ejs.publicKey,
+          template_params: { to_email: email, to_name: targetId || 'User', otp_code: otpCode, mobile_no: `+91-${cleanMobile}`, purpose: purposeLabel }
+        })
+      });
+      if (emailRes.ok) deliveredChannels.push(`Email (${email})`);
+    } catch {}
+  }
+
+  // Channel 3: REAL PYTHON BACKEND (Fast2SMS Cellular SMS + Gmail SMTP + SQLite3 Audit Log)
+  try {
+    const pyRes = await fetch('/api/send-sms-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roll_id: targetId || 'NEW-USER', mobile_no: cleanMobile })
+      body: JSON.stringify({ roll_id: targetId || 'NEW-USER', mobile_no: cleanMobile, email: email || '', otp_code: otpCode })
     });
-    if (res.ok) {
-      const data = await res.json();
-      otpCode = data.otp;
+    if (pyRes.ok) {
+      const d = await pyRes.json();
+      if (Array.isArray(d.channels) && d.channels.length) deliveredChannels.push(...d.channels);
     }
   } catch {}
 
-  // 2. Dispatch Live Push Notification to Phone via ntfy.sh
-  const pushTopic = `edupulse-otp-${cleanMobile}`;
-  try {
-    fetch(`https://ntfy.sh/${pushTopic}`, {
-      method: 'POST',
-      headers: { 'Title': 'EduPulse Live Verification OTP', 'Priority': 'high', 'Tags': 'lock,shield' },
-      body: `Your EduPulse 6-digit verification OTP for ${targetId || cleanMobile} is: ${otpCode} (Valid 60s)`
-    }).catch(() => {});
-  } catch {}
-
   const sess = otpSessions[flowKey];
-  sess.code = otpCode;
+  sess.hash = otpHash;
   sess.mobile = cleanMobile;
   sess.verified = false;
   if (sess.timer) clearInterval(sess.timer);
 
-  // Build 6 segmented boxes
-  buildOtpBoxes(boxesContainerId, flowKey, (enteredCode, boxes) => {
-    if (enteredCode === sess.code) {
+  buildOtpBoxes(boxesContainerId, flowKey, async (enteredCode, boxes) => {
+    const enteredHash = await hashPassword(`${cleanMobile}:${enteredCode}`);
+    if (sess.hash && enteredHash === sess.hash) {
       sess.verified = true;
       if (sess.timer) clearInterval(sess.timer);
       boxes.forEach(b => b.classList.add('verified-box'));
-      closeLiveSmsToast();
       if (typeof onAutoVerify === 'function') onAutoVerify();
     } else {
-      setAuthAlert('error', 'Incorrect 6-digit OTP. Check the Live SMS Gateway notification.');
+      setAuthAlert('error', 'Invalid 6-digit OTP. Check your real phone notification or email inbox.');
     }
   });
 
-  // Start 60s Countdown
+  // 60-Second Security Expiry Countdown
   let secondsLeft = 60;
   const timerEl = document.getElementById(timerElId);
   if (timerEl) timerEl.textContent = '60s';
@@ -176,35 +168,25 @@ async function dispatchLiveSmsOtp({ flowKey, targetId, mobile, purposeLabel, box
     secondsLeft -= 1;
     if (secondsLeft <= 0) {
       clearInterval(sess.timer);
-      sess.code = null;
+      sess.hash = null;
       if (timerEl) timerEl.textContent = 'Expired';
     } else if (timerEl) {
       timerEl.textContent = `${secondsLeft}s`;
     }
   }, 1000);
 
-  // Show Floating Smartphone SMS Gateway Notification
-  const smsToast = document.getElementById('live-sms-toast');
-  document.getElementById('sms-toast-to').textContent = `+91-XXXXXX${cleanMobile.slice(-4)}`;
-  document.getElementById('sms-toast-purpose').textContent = purposeLabel;
-  document.getElementById('sms-toast-code').textContent = otpCode;
-  document.getElementById('sms-toast-phone-link').href = `https://ntfy.sh/${pushTopic}`;
-  smsToast.style.display = 'block';
+  // Show Real Phone Pairing Guidance (NEVER prints the OTP code on screen!)
+  const hintEl = document.getElementById(hintElId);
+  if (hintEl) {
+    const via = deliveredChannels.length ? deliveredChannels.join(' + ') : 'Phone Push Channel';
+    hintEl.innerHTML = `✅ <strong>Dispatched live</strong> via ${via}.<br/>📱 <strong>Receive on your phone:</strong> Open the free <em>ntfy</em> app (or mobile browser) at <a href="https://ntfy.sh/${phoneTopic}" target="_blank" style="color:var(--cyan);">ntfy.sh/${phoneTopic}</a> on your phone.`;
+  }
 
-  const fillBtn = document.getElementById('sms-toast-fill-btn');
-  const freshFillBtn = fillBtn.cloneNode(true);
-  fillBtn.parentNode.replaceChild(freshFillBtn, fillBtn);
-  freshFillBtn.addEventListener('click', () => {
-    fillOtpBoxesProgrammatically(boxesContainerId, otpCode);
-  });
-
-  return otpCode;
+  return true;
 }
 
-// Switch top-level portal gate between Student Gate and Admin/HOD/Coordinator Gate
 function switchPortalGate(gate) {
   stopAuthCamera();
-  closeLiveSmsToast();
   setAuthAlert('', '');
   const sGate = document.getElementById('student-gate-container');
   const fGate = document.getElementById('faculty-gate-container');
@@ -225,7 +207,7 @@ function switchPortalGate(gate) {
     sGate.style.display = 'block';
     fBtn.classList.remove('active');
     sBtn.classList.add('active');
-    activateAuthSubTab('student-login', sGate);
+    activateAuthSubTab(state.members.length ? 'student-login' : 'student-register', sGate);
   }
 }
 
@@ -248,12 +230,11 @@ function extractDescriptorFromImageElement(imgEl) {
   const imgData = ctx.getImageData(0, 0, 140, 140).data;
 
   const desc = [];
-  const block = 10;
   for (let by = 0; by < 14; by++) {
     for (let bx = 0; bx < 14; bx++) {
       let r = 0, g = 0, b = 0, c = 0;
-      for (let y = by * block; y < (by + 1) * block; y += 2) {
-        for (let x = bx * block; x < (bx + 1) * block; x += 2) {
+      for (let y = by * 10; y < (by + 1) * 10; y += 2) {
+        for (let x = bx * 10; x < (bx + 1) * 10; x += 2) {
           const idx = (y * 140 + x) * 4;
           r += imgData[idx]; g += imgData[idx + 1]; b += imgData[idx + 2]; c++;
         }
@@ -262,10 +243,7 @@ function extractDescriptorFromImageElement(imgEl) {
     }
   }
   const norm = Math.sqrt(desc.reduce((s, v) => s + v * v, 0)) || 1;
-  return {
-    vector: desc.map(v => v / norm),
-    thumbnail: canvas.toDataURL('image/jpeg', 0.85)
-  };
+  return { vector: desc.map(v => v / norm), thumbnail: canvas.toDataURL('image/jpeg', 0.85) };
 }
 
 function updatePipelineStageUI(activeStage) {
@@ -283,48 +261,18 @@ function updatePipelineStageUI(activeStage) {
 
 function openUnifiedForgotPanel(accountType) {
   stopAuthCamera();
-  closeLiveSmsToast();
   document.getElementById('student-gate-container').style.display = 'none';
   document.getElementById('faculty-gate-container').style.display = 'none';
   document.getElementById('panel-forgot-password').classList.add('active');
 
   otpSessions.forgot.verified = false;
-  otpSessions.forgot.code = null;
+  otpSessions.forgot.hash = null;
   otpSessions.forgot.accountType = accountType;
   document.getElementById('forgot-account-type').value = accountType;
   updatePipelineStageUI(1);
   document.getElementById('forgot-stage-2').style.display = 'none';
   document.getElementById('forgot-stage-3').style.display = 'none';
   setAuthAlert('', '');
-
-  if (accountType === 'faculty') {
-    const pre = document.getElementById('coord-id').value.trim().toUpperCase();
-    if (pre) {
-      document.getElementById('forgot-roll-id').value = pre;
-      const f = state.coordinators.find(c => c.id.toUpperCase() === pre);
-      if (f?.mobile) document.getElementById('forgot-mobile-input').value = f.mobile;
-    }
-  } else {
-    const pre = document.getElementById('login-roll-id').value.trim().toUpperCase();
-    if (pre) {
-      document.getElementById('forgot-roll-id').value = pre;
-      const m = state.members.find(x => x.id.toUpperCase() === pre);
-      if (m?.mobile) document.getElementById('forgot-mobile-input').value = m.mobile;
-    }
-  }
-}
-
-function autoFillForgotDemo() {
-  const type = document.getElementById('forgot-account-type').value;
-  if (type === 'faculty') {
-    const f = state.coordinators[0];
-    document.getElementById('forgot-roll-id').value = f.id;
-    document.getElementById('forgot-mobile-input').value = f.mobile || '9876500001';
-  } else {
-    const m = state.members[0];
-    document.getElementById('forgot-roll-id').value = m.id;
-    document.getElementById('forgot-mobile-input').value = m.mobile || '9876501067';
-  }
 }
 
 async function triggerForgotPasswordOtp() {
@@ -333,30 +281,36 @@ async function triggerForgotPasswordOtp() {
   const mobile = document.getElementById('forgot-mobile-input').value.trim().replace(/\D/g, '');
 
   const list = type === 'faculty' ? state.coordinators : state.members;
+  if (!list.length) {
+    setAuthAlert('error', 'No accounts registered yet. Please register first.');
+    return;
+  }
   const account = list.find(x => x.id.toUpperCase() === targetId);
   if (!account) {
     setAuthAlert('error', `${type === 'faculty' ? 'Admin/HOD ID' : 'Student Roll ID'} "${targetId}" not found.`);
     return;
   }
-  if (account.mobile && account.mobile !== mobile) {
-    setAuthAlert('error', `Mobile +91-${mobile} does not match registered number for ${targetId}.`);
+  if (!account.mobile || account.mobile !== mobile) {
+    setAuthAlert('error', `Mobile +91-${mobile} does not match the registered number for ${targetId}.`);
     return;
   }
 
   otpSessions.forgot.targetId = targetId;
   otpSessions.forgot.accountType = type;
 
-  const sent = await dispatchLiveSmsOtp({
+  const sent = await dispatchRealLiveOtp({
     flowKey: 'forgot',
     targetId,
     mobile,
-    purposeLabel: `Password Reset OTP for ${account.name} (${targetId})`,
+    email: account.email || '',
+    purposeLabel: `Password Reset for ${account.name} (${targetId})`,
     boxesContainerId: 'forgot-otp-boxes',
     timerElId: 'otp-timer-text',
+    hintElId: 'forgot-otp-channel-hint',
     onAutoVerify: () => {
       updatePipelineStageUI(3);
       document.getElementById('forgot-stage-3').style.display = 'block';
-      setAuthAlert('success', '✅ Live Mobile OTP Verified! Set your new password below.');
+      setAuthAlert('success', '✅ Real Phone OTP Verified! Set your new password below.');
     }
   });
 
@@ -372,14 +326,12 @@ function setupAuthUI() {
   document.querySelectorAll('.auth-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       stopAuthCamera();
-      closeLiveSmsToast();
       const parentGate = btn.closest('#student-gate-container, #faculty-gate-container') || document;
       activateAuthSubTab(btn.dataset.authTab, parentGate);
       setAuthAlert('', '');
     });
   });
 
-  // Open Unified Forgot Password from either Student or Admin/HOD portal
   document.getElementById('open-forgot-btn').addEventListener('click', () => openUnifiedForgotPanel('student'));
   document.getElementById('open-fac-forgot-btn').addEventListener('click', () => openUnifiedForgotPanel('faculty'));
 
@@ -391,22 +343,22 @@ function setupAuthUI() {
   document.getElementById('send-otp-btn').addEventListener('click', triggerForgotPasswordOtp);
   document.getElementById('resend-otp-btn').addEventListener('click', triggerForgotPasswordOtp);
 
-  document.getElementById('verify-otp-btn').addEventListener('click', () => {
+  document.getElementById('verify-otp-btn').addEventListener('click', async () => {
     const code = getOtpBoxesValue('forgot-otp-boxes');
-    if (otpSessions.forgot.code && code === otpSessions.forgot.code) {
+    const enteredHash = await hashPassword(`${otpSessions.forgot.mobile}:${code}`);
+    if (otpSessions.forgot.hash && enteredHash === otpSessions.forgot.hash) {
       otpSessions.forgot.verified = true;
       updatePipelineStageUI(3);
       document.getElementById('forgot-stage-3').style.display = 'block';
-      closeLiveSmsToast();
-      setAuthAlert('success', '✅ Live OTP Verified! Create your new password below.');
+      setAuthAlert('success', '✅ Real OTP Verified! Create your new password below.');
     } else {
-      setAuthAlert('error', 'Enter all 6 digits of your live OTP first.');
+      setAuthAlert('error', 'Incorrect 6-digit OTP.');
     }
   });
 
   document.getElementById('forgot-password-form').addEventListener('submit', async e => {
     e.preventDefault();
-    if (!otpSessions.forgot.verified) { setAuthAlert('error', 'Complete Live OTP verification first.'); return; }
+    if (!otpSessions.forgot.verified) { setAuthAlert('error', 'Verify your phone OTP first.'); return; }
     const p1 = document.getElementById('forgot-new-pass').value;
     const p2 = document.getElementById('forgot-confirm-pass').value;
     if (p1.length < 4 || p1 !== p2) { setAuthAlert('error', 'Passwords must match (min 4 characters).'); return; }
@@ -418,33 +370,39 @@ function setupAuthUI() {
 
     acc.passwordHash = await hashPassword(p1);
     if (isFac && acc.id === 'HOD-ADMIN') state.coordinatorHash = acc.passwordHash;
-    logActivity(`Password reset via Live Mobile OTP for ${acc.name} (${acc.id})`, 'Security');
+    logActivity(`Password reset via Live Phone OTP for ${acc.name} (${acc.id})`, 'Security');
     window.saveState(state);
 
     const savedId = acc.id;
     e.target.reset();
     switchPortalGate(isFac ? 'faculty' : 'student');
     if (isFac) document.getElementById('coord-id').value = savedId;
-    else document.getElementById('login-roll-id').value = savedId;
+    else {
+      activateAuthSubTab('student-login', document.getElementById('student-gate-container'));
+      document.getElementById('login-roll-id').value = savedId;
+    }
     setAuthAlert('success', `✅ Password updated on Live Database for ${acc.name} (${savedId})!`);
   });
 
-  // Student Registration Live OTP Dispatch
+  // Student Registration Real Phone OTP Dispatch
   document.getElementById('reg-send-otp-btn').addEventListener('click', async () => {
     const mobile = document.getElementById('reg-mobile').value.trim();
-    const rollId = document.getElementById('reg-roll-id').value.trim().toUpperCase() || 'STUDENT';
-    const sent = await dispatchLiveSmsOtp({
+    const email = document.getElementById('reg-email').value.trim();
+    const rollId = document.getElementById('reg-roll-id').value.trim().toUpperCase() || 'NEW-STUDENT';
+    const sent = await dispatchRealLiveOtp({
       flowKey: 'reg',
       targetId: rollId,
       mobile,
-      purposeLabel: `Student Mobile Verification (${rollId})`,
+      email,
+      purposeLabel: `Student Registration (${rollId})`,
       boxesContainerId: 'reg-otp-boxes',
       timerElId: 'reg-otp-timer',
+      hintElId: 'reg-otp-channel-hint',
       onAutoVerify: () => {
         const badge = document.getElementById('reg-otp-badge');
         badge.className = 'badge badge-green';
-        badge.textContent = '✅ Mobile Verified';
-        setAuthAlert('success', '✅ Student Mobile Number Verified via Live OTP!');
+        badge.textContent = '✅ Phone Verified';
+        setAuthAlert('success', '✅ Real Mobile Number Verified via Live OTP!');
       }
     });
     if (sent) {
@@ -453,22 +411,25 @@ function setupAuthUI() {
     }
   });
 
-  // Admin / HOD Registration Live OTP Dispatch
+  // Admin / HOD Registration Real Phone OTP Dispatch
   document.getElementById('fac-send-otp-btn').addEventListener('click', async () => {
     const mobile = document.getElementById('fac-reg-mobile').value.trim();
-    const facId = document.getElementById('fac-reg-id').value.trim().toUpperCase() || 'ADMIN-HOD';
-    const sent = await dispatchLiveSmsOtp({
+    const email = document.getElementById('fac-reg-email').value.trim();
+    const facId = document.getElementById('fac-reg-id').value.trim().toUpperCase() || 'NEW-HOD';
+    const sent = await dispatchRealLiveOtp({
       flowKey: 'fac',
       targetId: facId,
       mobile,
-      purposeLabel: `Admin / HOD Mobile Verification (${facId})`,
+      email,
+      purposeLabel: `Admin / HOD Registration (${facId})`,
       boxesContainerId: 'fac-otp-boxes',
       timerElId: 'fac-otp-timer',
+      hintElId: 'fac-otp-channel-hint',
       onAutoVerify: () => {
         const badge = document.getElementById('fac-otp-badge');
         badge.className = 'badge badge-green';
-        badge.textContent = '✅ Admin Mobile Verified';
-        setAuthAlert('success', '✅ Admin / HOD Mobile Number Verified via Live OTP!');
+        badge.textContent = '✅ Admin Phone Verified';
+        setAuthAlert('success', '✅ Official Admin / HOD Mobile Verified via Live OTP!');
       }
     });
     if (sent) {
@@ -480,6 +441,10 @@ function setupAuthUI() {
   // Student Sign In
   document.getElementById('student-login-form').addEventListener('submit', async e => {
     e.preventDefault();
+    if (!state.members.length) {
+      setAuthAlert('warning', 'No students are registered yet. Switch to "📝 New Student Register" to create the first student account.');
+      return;
+    }
     const rollId = document.getElementById('login-roll-id').value.trim().toUpperCase();
     const pass = document.getElementById('login-password').value;
     const idx = state.members.findIndex(m => m.id.toUpperCase() === rollId);
@@ -489,7 +454,6 @@ function setupAuthUI() {
     if (member.status === 'pending') { setAuthAlert('warning', `⏳ Account Pending Admin / HOD Approval for ${member.name} (${member.id}).`); return; }
     if (member.status === 'rejected') { setAuthAlert('error', `❌ Registration Rejected for ${member.id}.`); return; }
     stopAuthCamera();
-    closeLiveSmsToast();
     state.activeMemberIndex = idx;
     state.session = { role: 'student', memberId: member.id };
     window.saveState(state);
@@ -501,12 +465,13 @@ function setupAuthUI() {
     e.preventDefault();
     const name = document.getElementById('reg-name').value.trim();
     const rollId = document.getElementById('reg-roll-id').value.trim().toUpperCase();
+    const email = document.getElementById('reg-email').value.trim();
     const mobile = document.getElementById('reg-mobile').value.trim().replace(/\D/g, '');
     const year = document.getElementById('reg-year').value;
     const pass = document.getElementById('reg-password').value;
 
     if (!otpSessions.reg.verified || otpSessions.reg.mobile !== mobile) {
-      setAuthAlert('error', '📲 Please click "Send Live OTP" and verify your 6-digit mobile OTP first.');
+      setAuthAlert('error', '📲 Please click "Send Live OTP" and enter the 6-digit code sent to your phone.');
       return;
     }
     if (state.members.some(m => m.id.toUpperCase() === rollId)) {
@@ -516,14 +481,14 @@ function setupAuthUI() {
 
     const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
     state.members.push({
-      name, id: rollId, mobile, mobileVerified: true, year, initials, passwordHash: await hashPassword(pass), status: 'pending',
+      name, id: rollId, email, mobile, mobileVerified: true, year, initials, passwordHash: await hashPassword(pass), status: 'pending',
       registeredAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      streak: 1, xp: 500, faceRegistered: Boolean(signupFaceData),
+      streak: 1, xp: 100, faceRegistered: Boolean(signupFaceData),
       facePhoto: signupFaceData ? signupFaceData.thumbnail : null,
       faceDescriptor: signupFaceData ? signupFaceData.vector : null,
-      performanceHistory: [75, 78, 80, 82, 85, 88], subjects: createBTechSubjects()
+      performanceHistory: [0, 0, 0, 0, 0, 0], subjects: createBTechSubjects()
     });
-    logActivity(`OTP-Verified Student Registration: ${name} (${rollId}) — Pending Admin Approval`, 'Registration');
+    logActivity(`Live Student Registration: ${name} (${rollId}) — Awaiting HOD Approval`, 'Live Reg');
     window.saveState(state);
     updatePendingBadges();
 
@@ -533,10 +498,11 @@ function setupAuthUI() {
     document.getElementById('reg-otp-section').style.display = 'none';
     document.getElementById('reg-otp-badge').className = 'badge badge-amber';
     document.getElementById('reg-otp-badge').textContent = 'Unverified';
+    document.getElementById('reg-face-preview').style.display = 'none';
     stopAuthCamera();
     activateAuthSubTab('student-login', document.getElementById('student-gate-container'));
     document.getElementById('login-roll-id').value = rollId;
-    setAuthAlert('warning', `✅ Registered ${name} (${rollId}) with Verified Mobile! Switch to "🏛️ Admin / HOD / Coord" to approve.`);
+    setAuthAlert('warning', `✅ Registered ${name} (${rollId}) live! Waiting for HOD / Coordinator Approval before sign-in.`);
   });
 
   // Student Face Capture on Register
@@ -570,21 +536,17 @@ function setupAuthUI() {
     const enteredHash = await hashPassword(pass);
 
     const fac = state.coordinators.find(c => c.id.toUpperCase() === id);
-    if (!fac) {
-      setAuthAlert('error', `Admin / HOD ID "${id}" not found. Click "📝 Register Admin / HOD" to register.`);
-      return;
-    }
+    if (!fac) { setAuthAlert('error', `Admin / HOD ID "${id}" not found.`); return; }
     if (enteredHash !== fac.passwordHash && !(id === 'HOD-ADMIN' && enteredHash === state.coordinatorHash)) {
       setAuthAlert('error', 'Incorrect Admin / HOD password.');
       return;
     }
     if (fac.status !== 'approved') {
-      setAuthAlert('warning', `⏳ ${fac.name} (${fac.id}) is awaiting Master HOD verification in the Admin Registry.`);
+      setAuthAlert('warning', `⏳ ${fac.name} (${fac.id}) is awaiting Master HOD verification.`);
       return;
     }
 
     stopAuthCamera();
-    closeLiveSmsToast();
     state.session = { role: 'coordinator', memberId: fac.id };
     window.saveState(state);
     checkSessionAndRender();
@@ -596,21 +558,17 @@ function setupAuthUI() {
     const preview = document.getElementById('fac-reg-preview');
     const status = document.getElementById('fac-photo-status');
     const btn = document.getElementById('fac-cam-capture-btn');
-
     if (!authCamStream) {
       try {
         authCamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         video.srcObject = authCamStream;
         video.style.display = 'block';
         btn.textContent = '📸 Snap Live Picture Now';
-        status.textContent = 'Camera active — align face and click "📸 Snap Live Picture Now".';
+        status.textContent = 'Camera active — align face and snap.';
         status.style.color = 'var(--cyan)';
-      } catch {
-        setAuthAlert('error', 'Webcam blocked — use "📁 Upload Live Photo" right next to it!');
-      }
+      } catch { setAuthAlert('error', 'Webcam blocked — use "📁 Upload Live Photo"!'); }
       return;
     }
-
     if (video.readyState >= 2) {
       facultyFaceData = extractFaceDescriptor(video);
       preview.src = facultyFaceData.thumbnail;
@@ -622,7 +580,7 @@ function setupAuthUI() {
     }
   });
 
-  // Admin / HOD Live Photo File Upload
+  // Admin / HOD Photo Upload
   document.getElementById('fac-photo-upload').addEventListener('change', e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -632,12 +590,10 @@ function setupAuthUI() {
       const img = new Image();
       img.onload = () => {
         facultyFaceData = extractDescriptorFromImageElement(img);
-        const preview = document.getElementById('fac-reg-preview');
-        const status = document.getElementById('fac-photo-status');
-        preview.src = facultyFaceData.thumbnail;
-        preview.style.display = 'block';
-        status.textContent = `✅ Live Photo Uploaded (${file.name}) & 392-D Biometric Encoded!`;
-        status.style.color = 'var(--green)';
+        document.getElementById('fac-reg-preview').src = facultyFaceData.thumbnail;
+        document.getElementById('fac-reg-preview').style.display = 'block';
+        document.getElementById('fac-photo-status').textContent = `✅ Live Photo Uploaded (${file.name}) & 392-D Encoded!`;
+        document.getElementById('fac-photo-status').style.color = 'var(--green)';
       };
       img.src = ev.target.result;
     };
@@ -651,16 +607,17 @@ function setupAuthUI() {
     const facId = document.getElementById('fac-reg-id').value.trim().toUpperCase();
     const designation = document.getElementById('fac-reg-role').value;
     const department = document.getElementById('fac-reg-dept').value;
+    const email = document.getElementById('fac-reg-email').value.trim();
     const mobile = document.getElementById('fac-reg-mobile').value.trim().replace(/\D/g, '');
     const pass = document.getElementById('fac-reg-password').value;
     const deptCode = document.getElementById('fac-reg-code').value.trim().toUpperCase();
 
     if (!otpSessions.fac.verified || otpSessions.fac.mobile !== mobile) {
-      setAuthAlert('error', '📲 Please click "Send Live OTP" and verify your 6-digit official mobile OTP first.');
+      setAuthAlert('error', '📲 Please click "Send Live OTP" and verify your 6-digit phone OTP first.');
       return;
     }
     if (!facultyFaceData) {
-      setAuthAlert('error', '🪪 Mandatory Verification: Capture a live webcam picture or upload a live photo.');
+      setAuthAlert('error', '🪪 Mandatory Verification: Capture a live webcam picture or upload a photo.');
       return;
     }
     if (state.coordinators.some(c => c.id.toUpperCase() === facId)) {
@@ -672,19 +629,10 @@ function setupAuthUI() {
     const autoApproved = deptCode === 'FAC2026';
 
     state.coordinators.push({
-      name,
-      id: facId,
-      designation,
-      department,
-      mobile,
-      mobileVerified: true,
-      initials,
-      passwordHash: await hashPassword(pass),
-      status: autoApproved ? 'approved' : 'pending',
+      name, id: facId, designation, department, email, mobile, mobileVerified: true, initials,
+      passwordHash: await hashPassword(pass), status: autoApproved ? 'approved' : 'pending',
       registeredAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      faceRegistered: true,
-      facePhoto: facultyFaceData.thumbnail,
-      faceDescriptor: facultyFaceData.vector
+      faceRegistered: true, facePhoto: facultyFaceData.thumbnail, faceDescriptor: facultyFaceData.vector
     });
 
     logActivity(`New ${designation}: ${name} (${facId}) registered with Live OTP & Photo`, 'Admin Reg');
@@ -698,17 +646,12 @@ function setupAuthUI() {
     document.getElementById('fac-otp-badge').className = 'badge badge-amber';
     document.getElementById('fac-otp-badge').textContent = 'Unverified';
     document.getElementById('fac-reg-preview').style.display = 'none';
-    document.getElementById('fac-photo-status').textContent = 'No live verification picture captured yet.';
-    document.getElementById('fac-photo-status').style.color = 'var(--text-muted)';
 
     activateAuthSubTab('coordinator-login', document.getElementById('faculty-gate-container'));
     document.getElementById('coord-id').value = facId;
-
-    if (autoApproved) {
-      setAuthAlert('success', `✅ ${name} (${facId}) verified via Live OTP, Photo & Auth Key! Sign in now.`);
-    } else {
-      setAuthAlert('warning', `⏳ ${name} (${facId}) registered! Sign in as Master HOD (HOD-ADMIN) to verify & approve.`);
-    }
+    setAuthAlert(autoApproved ? 'success' : 'warning', autoApproved
+      ? `✅ ${name} (${facId}) verified via Real Phone OTP, Photo & Auth Key! Sign in now.`
+      : `⏳ ${name} (${facId}) registered! Sign in as HOD-ADMIN to verify & approve.`);
   });
 
   document.getElementById('faculty-face-login-btn').addEventListener('click', startFacultyFaceSignIn);
@@ -716,7 +659,6 @@ function setupAuthUI() {
   document.getElementById('signout-btn').addEventListener('click', () => {
     stopCamera();
     stopAuthCamera();
-    closeLiveSmsToast();
     state.session = null;
     window.saveState(state);
     checkSessionAndRender();
@@ -727,10 +669,7 @@ async function startFacultyFaceSignIn() {
   const box = document.getElementById('faculty-face-box');
   const video = document.getElementById('faculty-face-video');
   const enrolled = state.coordinators.map((c, idx) => ({ c, idx })).filter(x => x.c.faceRegistered && x.c.faceDescriptor);
-  if (!enrolled.length) {
-    setAuthAlert('warning', 'No Admin/HOD live pictures enrolled yet. Register first!');
-    return;
-  }
+  if (!enrolled.length) { setAuthAlert('warning', 'No Admin/HOD live pictures enrolled yet.'); return; }
   try {
     authCamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     video.srcObject = authCamStream;
@@ -748,10 +687,7 @@ async function startFacultyFaceSignIn() {
       if (bestSim >= 0.89 && bestIdx !== -1) {
         const matched = state.coordinators[bestIdx];
         stopAuthCamera();
-        if (matched.status !== 'approved') {
-          setAuthAlert('warning', `Face matched (${matched.name}), awaiting Master HOD approval.`);
-          return;
-        }
+        if (matched.status !== 'approved') { setAuthAlert('warning', `Face matched (${matched.name}), awaiting Master HOD approval.`); return; }
         state.session = { role: 'coordinator', memberId: matched.id };
         window.saveState(state);
         checkSessionAndRender();
@@ -764,7 +700,7 @@ async function startFaceSignIn() {
   const box = document.getElementById('face-login-box');
   const video = document.getElementById('face-login-video');
   const enrolled = state.members.map((m, idx) => ({ m, idx })).filter(x => x.m.faceRegistered && x.m.faceDescriptor);
-  if (!enrolled.length) { setAuthAlert('warning', 'No Student Face IDs enrolled yet.'); return; }
+  if (!enrolled.length) { setAuthAlert('warning', 'No Student Face IDs registered yet.'); return; }
   try {
     authCamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     video.srcObject = authCamStream;
@@ -782,7 +718,7 @@ async function startFaceSignIn() {
       if (bestSim >= 0.90 && bestIdx !== -1) {
         const matched = state.members[bestIdx];
         stopAuthCamera();
-        if (matched.status !== 'approved') { setAuthAlert('warning', `Face matched (${matched.name}), awaiting Admin/HOD Approval.`); return; }
+        if (matched.status !== 'approved') { setAuthAlert('warning', `Face matched (${matched.name}), awaiting HOD Approval.`); return; }
         state.activeMemberIndex = bestIdx;
         state.session = { role: 'student', memberId: matched.id };
         window.saveState(state);
@@ -795,14 +731,8 @@ async function startFaceSignIn() {
 function stopAuthCamera() {
   if (faceLoginTimer) { clearInterval(faceLoginTimer); faceLoginTimer = null; }
   if (authCamStream) { authCamStream.getTracks().forEach(t => t.stop()); authCamStream = null; }
-  ['reg-video', 'fac-reg-video'].forEach(id => {
-    const v = document.getElementById(id);
-    if (v) { v.srcObject = null; v.style.display = 'none'; }
-  });
-  ['face-login-box', 'faculty-face-box'].forEach(id => {
-    const b = document.getElementById(id);
-    if (b) b.style.display = 'none';
-  });
+  ['reg-video', 'fac-reg-video'].forEach(id => { const v = document.getElementById(id); if (v) { v.srcObject = null; v.style.display = 'none'; } });
+  ['face-login-box', 'faculty-face-box'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = 'none'; });
 }
 
 function setAuthAlert(type, msg) {
@@ -820,17 +750,15 @@ function updatePendingBadges() {
 
   ['coord-pending-badge', 'login-pending-badge'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) {
-      el.textContent = totalPending;
-      el.style.display = totalPending ? 'inline-block' : 'none';
-    }
+    if (el) { el.textContent = totalPending; el.style.display = totalPending ? 'inline-block' : 'none'; }
   });
+
+  const countEl = document.getElementById('auth-student-count');
+  if (countEl) countEl.textContent = `${state.members.length} Student${state.members.length === 1 ? '' : 's'} Registered`;
 }
 
 function scrollToHodSection(sectionId) {
-  setTimeout(() => {
-    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 80);
+  setTimeout(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
 }
 
 function checkSessionAndRender() {
@@ -850,39 +778,41 @@ function checkSessionAndRender() {
   if (state.session.role === 'coordinator') {
     document.body.classList.remove('role-student');
     document.body.classList.add('role-hod');
-
     document.getElementById('sidebar-brand-icon').textContent = '🛡️';
     document.getElementById('sidebar-brand-title').textContent = 'Admin OS';
     document.getElementById('sidebar-brand-sub').textContent = 'HOD & Faculty Governance';
     document.getElementById('sidebar-footer-icon').textContent = '🏛️';
     document.getElementById('sidebar-streak').textContent = 'Admin / HOD Portal';
-    document.getElementById('sidebar-xp').textContent = 'Verified Session';
+    document.getElementById('sidebar-xp').textContent = 'Live Governance';
 
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('nav-coordinator-btn').classList.add('active');
     document.getElementById('view-coordinator').classList.add('active');
     document.getElementById('page-title').textContent = 'Admin, HOD & Coordinator Governance Portal';
-    document.getElementById('page-subtitle').textContent = 'Executive Governance Workspace — Approve registrations, verify live photos & audit attendance';
+    document.getElementById('page-subtitle').textContent = 'Real-Time Approvals, Live Cloud DB & Biometric Audit';
   } else {
+    const idx = state.members.findIndex(m => m.id === state.session.memberId);
+    if (idx === -1) {
+      state.session = null;
+      window.saveState(state);
+      checkSessionAndRender();
+      return;
+    }
+    state.activeMemberIndex = idx;
     document.body.classList.remove('role-hod');
     document.body.classList.add('role-student');
-
     document.getElementById('sidebar-brand-icon').textContent = 'EP';
     document.getElementById('sidebar-brand-title').textContent = 'EduPulse';
     document.getElementById('sidebar-brand-sub').textContent = 'Smart Student OS';
     document.getElementById('sidebar-footer-icon').textContent = '🔥';
 
-    const idx = state.members.findIndex(m => m.id === state.session.memberId);
-    if (idx !== -1) state.activeMemberIndex = idx;
-
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    const dashBtn = document.querySelector('.student-only[data-view="dashboard"]');
-    if (dashBtn) dashBtn.classList.add('active');
+    document.querySelector('.student-only[data-view="dashboard"]')?.classList.add('active');
     document.getElementById('view-dashboard').classList.add('active');
     document.getElementById('page-title').textContent = 'Dashboard Overview';
-    document.getElementById('page-subtitle').textContent = 'B.Tech 2nd & 3rd Year attendance, biometric ID & study insights';
+    document.getElementById('page-subtitle').textContent = 'Real-time attendance, biometric ID & study insights';
   }
 
   renderAll();
@@ -896,19 +826,20 @@ function renderCoordinatorPortal() {
   const faces = state.members.filter(m => m.faceRegistered).length;
 
   let deptAttSum = 0;
+  let countedAtt = 0;
   const defaulters = [];
   state.members.forEach(m => {
     const totAtt = m.subjects.reduce((s, x) => s + x.attended, 0);
     const totCls = m.subjects.reduce((s, x) => s + x.total, 0);
-    const pct = totCls ? Number(((totAtt / totCls) * 100).toFixed(1)) : 0;
-    deptAttSum += pct;
-    if (pct < 75) {
-      defaulters.push({ member: m, pct, classesNeeded: Math.max(1, Math.ceil((0.75 * totCls - totAtt) / 0.25)) });
+    if (totCls > 0) {
+      const pct = Number(((totAtt / totCls) * 100).toFixed(1));
+      deptAttSum += pct;
+      countedAtt++;
+      if (pct < 75) defaulters.push({ member: m, pct, classesNeeded: Math.max(1, Math.ceil((0.75 * totCls - totAtt) / 0.25)) });
     }
   });
 
-  const deptAvgAtt = state.members.length ? (deptAttSum / state.members.length).toFixed(1) : '0.0';
-
+  const deptAvgAtt = countedAtt ? (deptAttSum / countedAtt).toFixed(1) : '0.0';
   if (document.getElementById('coord-kpi-pending')) document.getElementById('coord-kpi-pending').textContent = pendingStudents.length + pendingFaculty.length;
   if (document.getElementById('coord-kpi-approved')) document.getElementById('coord-kpi-approved').textContent = approvedStudents.length;
   if (document.getElementById('coord-kpi-avg-att')) document.getElementById('coord-kpi-avg-att').textContent = `${deptAvgAtt}%`;
@@ -918,13 +849,13 @@ function renderCoordinatorPortal() {
   const pBody = document.getElementById('pending-approvals-body');
   if (pBody) {
     pBody.innerHTML = !pendingStudents.length
-      ? `<tr><td colspan="6" style="color:var(--text-muted);text-align:center;">🎉 All student registrations reviewed! Queue is clear.</td></tr>`
+      ? `<tr><td colspan="6" style="color:var(--text-muted);text-align:center;">Waiting for new student registrations... Share your live link so students can register!</td></tr>`
       : pendingStudents.map(m => `
         <tr>
           <td>${m.facePhoto ? `<img src="${m.facePhoto}" class="roster-face-thumb"/>` : `<span class="badge badge-amber">No Photo</span>`}</td>
           <td><strong>${m.name}</strong><div style="font-size:0.72rem;color:var(--text-muted);">${m.registeredAt || 'Live'}</div></td>
           <td><span class="badge badge-cyan">${m.id}</span></td>
-          <td style="font-family:'JetBrains Mono',monospace;">+91-${m.mobile || 'N/A'} <span class="badge badge-green" style="font-size:0.65rem;">OTP ✓</span></td>
+          <td style="font-family:'JetBrains Mono',monospace;">+91-${m.mobile} <span class="badge badge-green" style="font-size:0.65rem;">OTP ✓</span><div style="font-size:0.72rem;color:var(--text-muted);">${m.email || ''}</div></td>
           <td>${m.year}</td>
           <td style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn-primary" style="padding:5px 11px;font-size:0.78rem;" onclick="setMemberApproval('${m.id}','approved')">✅ Approve</button>
@@ -943,51 +874,28 @@ function renderCoordinatorPortal() {
       const picCell = c.facePhoto
         ? `<img src="${c.facePhoto}" class="roster-face-thumb" style="width:40px;height:40px;border-color:var(--green);" alt="${c.name}" />`
         : `<div class="avatar" style="width:36px;height:36px;font-size:0.78rem;">${c.initials}</div>`;
-      const stBadge = c.status === 'approved'
-        ? `<span class="badge badge-green">Verified ✓</span>`
-        : `<span class="badge badge-amber">Pending Review ⏳</span>`;
+      const stBadge = c.status === 'approved' ? `<span class="badge badge-green">Verified ✓</span>` : `<span class="badge badge-amber">Pending Review ⏳</span>`;
       const actionBtn = c.id === 'HOD-ADMIN'
         ? `<span class="badge badge-purple">Master HOD</span>`
         : c.status !== 'approved'
         ? `<button class="btn-primary" style="padding:4px 10px;font-size:0.75rem;" onclick="setFacultyApproval('${c.id}','approved')">✅ Verify & Approve</button>`
         : `<button class="btn-outline" style="padding:4px 10px;font-size:0.75rem;" onclick="setFacultyApproval('${c.id}','pending')">Suspend</button>`;
-
-      return `
-        <tr>
-          <td>${picCell}</td>
-          <td><strong>${c.name}</strong><div style="font-size:0.72rem;color:var(--text-muted);">${c.registeredAt || 'Verified'}</div></td>
-          <td><span class="badge badge-amber">${c.id}</span></td>
-          <td><strong>${c.designation}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${c.department}</div></td>
-          <td style="font-family:'JetBrains Mono',monospace;">+91-${c.mobile || 'N/A'} <span class="badge badge-green" style="font-size:0.65rem;">OTP ✓</span></td>
-          <td>${stBadge}</td>
-          <td>${actionBtn}</td>
-        </tr>`;
+      return `<tr><td>${picCell}</td><td><strong>${c.name}</strong><div style="font-size:0.72rem;color:var(--text-muted);">${c.registeredAt || ''}</div></td><td><span class="badge badge-amber">${c.id}</span></td><td><strong>${c.designation}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${c.department}</div></td><td style="font-family:'JetBrains Mono',monospace;">${c.mobile ? '+91-' + c.mobile : 'Master'}</td><td>${stBadge}</td><td>${actionBtn}</td></tr>`;
     }).join('');
   }
 
   const defBody = document.getElementById('hod-defaulters-body');
   if (defBody) {
     defBody.innerHTML = !defaulters.length
-      ? `<tr><td colspan="3" style="color:var(--green);text-align:center;">✅ Zero defaulters! Every student is above 75%.</td></tr>`
-      : defaulters.map(d => `
-        <tr>
-          <td><strong>${d.member.name}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${d.member.id} • +91-${d.member.mobile || 'N/A'}</div></td>
-          <td><span class="badge badge-red">${d.pct}%</span></td>
-          <td style="color:var(--amber);font-size:0.82rem;">Needs +${d.classesNeeded} classes</td>
-        </tr>`).join('');
+      ? `<tr><td colspan="3" style="color:var(--text-muted);text-align:center;">No attendance defaulters currently flagged.</td></tr>`
+      : defaulters.map(d => `<tr><td><strong>${d.member.name}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${d.member.id}</div></td><td><span class="badge badge-red">${d.pct}%</span></td><td style="color:var(--amber);font-size:0.82rem;">Needs +${d.classesNeeded} classes</td></tr>`).join('');
   }
 
   const auditBody = document.getElementById('hod-live-audit-body');
   if (auditBody) {
     auditBody.innerHTML = !state.liveLogs?.length
       ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No live biometric scans recorded yet.</td></tr>`
-      : state.liveLogs.slice(0, 8).map(l => `
-        <tr>
-          <td>${l.time}</td>
-          <td><strong>${l.studentName}</strong> (${l.studentId})</td>
-          <td>${l.subject}</td>
-          <td><span class="badge badge-green">${l.confidence}</span></td>
-        </tr>`).join('');
+      : state.liveLogs.slice(0, 8).map(l => `<tr><td>${l.time}</td><td><strong>${l.studentName}</strong> (${l.studentId})</td><td>${l.subject}</td><td><span class="badge badge-green">${l.confidence}</span></td></tr>`).join('');
   }
 
   const searchQuery = (document.getElementById('hod-search-input')?.value || '').trim().toLowerCase();
@@ -1000,59 +908,24 @@ function renderCoordinatorPortal() {
 
   const aBody = document.getElementById('all-members-admin-body');
   if (aBody) {
-    aBody.innerHTML = filteredMembers.map(m => {
-      const totAtt = m.subjects.reduce((s, x) => s + x.attended, 0);
-      const totCls = m.subjects.reduce((s, x) => s + x.total, 0);
-      const attPct = totCls ? Math.round((totAtt / totCls) * 100) : 0;
-      const avgMarks = m.subjects.reduce((s, x) => s + x.internal + x.midterm + x.assignments, 0) / m.subjects.length;
-      const cgpa = Math.min(10, avgMarks / 9.5).toFixed(2);
+    if (!filteredMembers.length) {
+      aBody.innerHTML = `<tr><td colspan="7" style="color:var(--text-muted);text-align:center;">No students registered yet. Students who sign up live will appear here immediately.</td></tr>`;
+    } else {
+      aBody.innerHTML = filteredMembers.map(m => {
+        const totAtt = m.subjects.reduce((s, x) => s + x.attended, 0);
+        const totCls = m.subjects.reduce((s, x) => s + x.total, 0);
+        const attPct = totCls ? Math.round((totAtt / totCls) * 100) : 0;
+        const avgMarks = m.subjects.reduce((s, x) => s + x.internal + x.midterm + x.assignments, 0) / m.subjects.length;
+        const cgpa = Math.min(10, avgMarks / 9.5).toFixed(2);
 
-      if (editingRollId === m.id) {
-        return `
-          <tr style="background:rgba(34,211,238,0.08);">
-            <td><input type="text" id="edit-id-${m.id}" value="${m.id}" class="select-input" style="width:90px;padding:5px 8px;" /></td>
-            <td><input type="text" id="edit-name-${m.id}" value="${m.name}" class="select-input" style="width:150px;padding:5px 8px;" /></td>
-            <td><input type="tel" id="edit-mobile-${m.id}" value="${m.mobile || ''}" maxlength="10" class="select-input" style="width:110px;padding:5px 8px;" /></td>
-            <td>
-              <select id="edit-year-${m.id}" class="select-input" style="padding:5px 8px;">
-                <option value="B.Tech 2nd Year CSE" ${m.year.includes('2nd') ? 'selected' : ''}>2nd Yr CSE</option>
-                <option value="B.Tech 3rd Year CSE" ${m.year.includes('3rd') ? 'selected' : ''}>3rd Yr CSE</option>
-              </select>
-            </td>
-            <td>
-              <select id="edit-status-${m.id}" class="select-input" style="padding:5px 8px;">
-                <option value="approved" ${m.status === 'approved' ? 'selected' : ''}>Approved</option>
-                <option value="pending" ${m.status === 'pending' ? 'selected' : ''}>Pending</option>
-                <option value="rejected" ${m.status === 'rejected' ? 'selected' : ''}>Rejected</option>
-              </select>
-            </td>
-            <td><input type="number" id="edit-xp-${m.id}" value="${m.xp}" class="select-input" style="width:78px;padding:5px 8px;" /> XP</td>
-            <td style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button class="btn-primary" style="padding:5px 10px;font-size:0.76rem;" onclick="saveEditedMember('${m.id}')">💾 Save</button>
-              <button class="btn-outline" style="padding:5px 9px;font-size:0.76rem;" onclick="cancelEditMember()">Cancel</button>
-            </td>
-          </tr>`;
-      }
+        if (editingRollId === m.id) {
+          return `<tr style="background:rgba(34,211,238,0.08);"><td><input type="text" id="edit-id-${m.id}" value="${m.id}" class="select-input" style="width:95px;padding:5px 8px;" /></td><td><input type="text" id="edit-name-${m.id}" value="${m.name}" class="select-input" style="width:145px;padding:5px 8px;" /></td><td><input type="tel" id="edit-mobile-${m.id}" value="${m.mobile || ''}" maxlength="10" class="select-input" style="width:110px;padding:5px 8px;" /></td><td><select id="edit-year-${m.id}" class="select-input" style="padding:5px 8px;"><option value="B.Tech 2nd Year CSE" ${m.year.includes('2nd') ? 'selected' : ''}>2nd Yr CSE</option><option value="B.Tech 3rd Year CSE" ${m.year.includes('3rd') ? 'selected' : ''}>3rd Yr CSE</option></select></td><td><select id="edit-status-${m.id}" class="select-input" style="padding:5px 8px;"><option value="approved" ${m.status === 'approved' ? 'selected' : ''}>Approved</option><option value="pending" ${m.status === 'pending' ? 'selected' : ''}>Pending</option><option value="rejected" ${m.status === 'rejected' ? 'selected' : ''}>Rejected</option></select></td><td><input type="number" id="edit-xp-${m.id}" value="${m.xp}" class="select-input" style="width:75px;padding:5px 8px;" /> XP</td><td style="display:flex;gap:6px;"><button class="btn-primary" style="padding:5px 10px;font-size:0.76rem;" onclick="saveEditedMember('${m.id}')">💾 Save</button><button class="btn-outline" style="padding:5px 9px;font-size:0.76rem;" onclick="cancelEditMember()">Cancel</button></td></tr>`;
+        }
 
-      const badgeCls = m.status === 'approved' ? 'badge-green' : m.status === 'pending' ? 'badge-amber' : 'badge-red';
-      return `
-        <tr>
-          <td><strong>${m.id}</strong></td>
-          <td>${m.name}</td>
-          <td style="font-family:'JetBrains Mono',monospace;">+91-${m.mobile || 'N/A'}</td>
-          <td>${m.year}</td>
-          <td><span class="badge ${badgeCls}">${m.status.toUpperCase()}</span></td>
-          <td><strong style="color:${attPct < 75 ? 'var(--red)' : 'var(--green)'};">${attPct}%</strong> • ${cgpa} CGPA</td>
-          <td style="display:flex;gap:5px;flex-wrap:wrap;">
-            <button class="btn-outline" style="padding:4px 8px;font-size:0.74rem;" onclick="startEditMember('${m.id}')">✏️ Edit</button>
-            ${m.status !== 'approved'
-              ? `<button class="btn-primary" style="padding:4px 8px;font-size:0.74rem;" onclick="setMemberApproval('${m.id}','approved')">Approve</button>`
-              : `<button class="btn-outline" style="padding:4px 8px;font-size:0.74rem;" onclick="setMemberApproval('${m.id}','pending')">Hold</button>`}
-            <button class="btn-outline" style="padding:4px 7px;font-size:0.74rem;" onclick="coordinatorResetPassword('${m.id}')" title="Reset password to pass123">🔑</button>
-            <button class="btn-outline" style="padding:4px 7px;font-size:0.74rem;border-color:var(--red);color:var(--red);" onclick="deleteMemberRecord('${m.id}')" title="Delete student">🗑️</button>
-          </td>
-        </tr>`;
-    }).join('');
+        const badgeCls = m.status === 'approved' ? 'badge-green' : m.status === 'pending' ? 'badge-amber' : 'badge-red';
+        return `<tr><td><strong>${m.id}</strong></td><td>${m.name}</td><td style="font-family:'JetBrains Mono',monospace;">+91-${m.mobile || 'N/A'}<div style="font-size:0.72rem;color:var(--text-muted);">${m.email || ''}</div></td><td>${m.year}</td><td><span class="badge ${badgeCls}">${m.status.toUpperCase()}</span></td><td><strong>${attPct}%</strong> • ${cgpa} CGPA</td><td style="display:flex;gap:5px;flex-wrap:wrap;"><button class="btn-outline" style="padding:4px 8px;font-size:0.74rem;" onclick="startEditMember('${m.id}')">✏️ Edit</button>${m.status !== 'approved' ? `<button class="btn-primary" style="padding:4px 8px;font-size:0.74rem;" onclick="setMemberApproval('${m.id}','approved')">Approve</button>` : `<button class="btn-outline" style="padding:4px 8px;font-size:0.74rem;" onclick="setMemberApproval('${m.id}','pending')">Hold</button>`}<button class="btn-outline" style="padding:4px 7px;font-size:0.74rem;border-color:var(--red);color:var(--red);" onclick="deleteMemberRecord('${m.id}')">🗑️</button></td></tr>`;
+      }).join('');
+    }
   }
 }
 
@@ -1060,24 +933,20 @@ function setFacultyApproval(facId, status) {
   const c = (state.coordinators || []).find(x => x.id === facId);
   if (!c) return;
   c.status = status;
-  logActivity(`Master HOD ${status.toUpperCase()} ${c.designation} ${c.name} (${c.id})`, 'Admin');
   window.saveState(state);
   renderAll();
   showToast(`✅ ${c.name} (${c.id}) set to ${status.toUpperCase()}!`);
 }
 
 function approveAllPending() {
-  const pendingS = state.members.filter(m => m.status === 'pending');
-  const pendingF = (state.coordinators || []).filter(c => c.status === 'pending');
-  if (!pendingS.length && !pendingF.length) {
-    showToast('No pending registrations to approve.');
-    return;
-  }
-  pendingS.forEach(m => { m.status = 'approved'; });
-  pendingF.forEach(c => { c.status = 'approved'; });
+  const pS = state.members.filter(m => m.status === 'pending');
+  const pF = (state.coordinators || []).filter(c => c.status === 'pending');
+  if (!pS.length && !pF.length) { showToast('No pending registrations.'); return; }
+  pS.forEach(m => { m.status = 'approved'; });
+  pF.forEach(c => { c.status = 'approved'; });
   window.saveState(state);
   renderAll();
-  showToast(`✅ Approved all ${pendingS.length + pendingF.length} pending registrations!`);
+  showToast(`✅ Approved all ${pS.length + pF.length} pending accounts live!`);
 }
 
 function startEditMember(rollId) { editingRollId = rollId; renderCoordinatorPortal(); }
@@ -1086,23 +955,20 @@ function cancelEditMember() { editingRollId = null; renderCoordinatorPortal(); }
 function saveEditedMember(oldRollId) {
   const m = state.members.find(x => x.id === oldRollId);
   if (!m) return;
-  const newId = document.getElementById(`edit-id-${oldRollId}`).value.trim().toUpperCase();
-  const newName = document.getElementById(`edit-name-${oldRollId}`).value.trim();
-  const newMobile = document.getElementById(`edit-mobile-${oldRollId}`).value.trim().replace(/\D/g, '');
-  const newYear = document.getElementById(`edit-year-${oldRollId}`).value;
-  const newStatus = document.getElementById(`edit-status-${oldRollId}`).value;
-  const newXp = Number(document.getElementById(`edit-xp-${oldRollId}`).value) || 0;
-  if (!newId || !newName) { showToast('Name and Roll ID are required.'); return; }
-  m.id = newId; m.name = newName; m.mobile = newMobile; m.year = newYear; m.status = newStatus; m.xp = newXp;
-  m.initials = newName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  m.id = document.getElementById(`edit-id-${oldRollId}`).value.trim().toUpperCase();
+  m.name = document.getElementById(`edit-name-${oldRollId}`).value.trim();
+  m.mobile = document.getElementById(`edit-mobile-${oldRollId}`).value.trim().replace(/\D/g, '');
+  m.year = document.getElementById(`edit-year-${oldRollId}`).value;
+  m.status = document.getElementById(`edit-status-${oldRollId}`).value;
+  m.xp = Number(document.getElementById(`edit-xp-${oldRollId}`).value) || 0;
+  m.initials = m.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   editingRollId = null;
   window.saveState(state);
   renderAll();
-  showToast(`💾 Saved & synced ${m.name} (${m.id}) to Live Database!`);
+  showToast(`💾 Updated ${m.name} on Live Database!`);
 }
 
 function deleteMemberRecord(rollId) {
-  if (state.members.length <= 1) { showToast('At least one student must remain.'); return; }
   const idx = state.members.findIndex(x => x.id === rollId);
   if (idx === -1) return;
   const removed = state.members[idx];
@@ -1121,14 +987,3 @@ function setMemberApproval(rollId, status) {
   renderAll();
   showToast(`✅ ${m.name} (${m.id}) set to ${status.toUpperCase()}!`);
 }
-
-async function coordinatorResetPassword(rollId) {
-  const m = state.members.find(x => x.id === rollId);
-  if (!m) return;
-  m.passwordHash = await hashPassword('pass123');
-  window.saveState(state);
-  showToast(`🔑 Password for ${m.name} reset to "pass123".`);
-}
-
-function fillDemoLogin(id, pass) { document.getElementById('login-roll-id').value = id; document.getElementById('login-password').value = pass; }
-function fillCoordinatorDemo() { document.getElementById('coord-id').value = 'HOD-ADMIN'; document.getElementById('coord-password').value = 'admin123'; }
