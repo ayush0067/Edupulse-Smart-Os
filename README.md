@@ -1,4 +1,7 @@
-﻿# EduPulse Smart OS — Biometric Attendance, Predictive SGPA & AI Learning System
+﻿                                       <!--README.md--> 
+
+
+# EduPulse Smart OS — Biometric Attendance, Predictive SGPA & AI Learning System
 
 ## 1. System Architecture
 - **Frontend Layer**: HTML5, Glassmorphic CSS3, Chart.js, WebRTC MediaDevices API, Web Crypto SHA-256.

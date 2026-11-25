@@ -1,4 +1,6 @@
-﻿const makeQ = (id, subject, difficulty, xp, title, prompt, options, answerIndex, explanation) => ({
+﻿                                    // js/questionBank.js
+
+const makeQ = (id, subject, difficulty, xp, title, prompt, options, answerIndex, explanation) => ({
   id, subject, difficulty, xp, title, prompt, options, answerIndex, explanation, solved: false
 });
 

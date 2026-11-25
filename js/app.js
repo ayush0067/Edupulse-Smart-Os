@@ -1,4 +1,6 @@
-﻿let state = loadState();
+﻿                                 // js/app.js
+                                 
+let state = loadState();
 if (!state.liveLogs) state.liveLogs = [];
 let selectedQuestionId = null;
 let liveStream = null;

@@ -1,4 +1,7 @@
-﻿import hashlib
+﻿                              # backend/database.py
+
+
+import hashlib
 import json
 import sqlite3
 from datetime import datetime

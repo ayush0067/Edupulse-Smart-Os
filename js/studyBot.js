@@ -1,4 +1,6 @@
-﻿const BOT_HISTORY_KEY = 'edupulse_bot_history_v2';
+﻿                                  // js/studyBot.js
+
+const BOT_HISTORY_KEY = 'edupulse_bot_history_v2';
 let botMessages = loadBotHistory();
 
 function loadBotHistory() {

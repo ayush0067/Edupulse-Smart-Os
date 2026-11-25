@@ -1,4 +1,6 @@
-﻿let authCamStream = null;
+﻿                               // js/auth.js
+
+let authCamStream = null;
 let signupFaceData = null;
 let facultyFaceData = null;
 let faceLoginTimer = null;

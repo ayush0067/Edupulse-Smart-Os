@@ -1,4 +1,6 @@
-﻿let perfChartInstance = null;
+﻿                                          // js/charts.js
+
+let perfChartInstance = null;
 let attChartInstance = null;
 let gradeChartInstance = null;
 

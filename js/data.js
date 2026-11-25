@@ -1,4 +1,6 @@
-﻿const STORAGE_KEY = 'edupulse_live_prod_v1';
+﻿                                  // js/data.js
+
+const STORAGE_KEY = 'edupulse_live_prod_v1';
 
 function createBTechSubjects() {
   return [

@@ -1,4 +1,6 @@
-﻿let pythonOnline = false;
+﻿                                    // js/pythonBridge.js
+
+let pythonOnline = false;
 let latestOfficialNotice = '';
 let prevFrameLuma = null;
 let liveHumanConfirmed = false;

@@ -1,4 +1,6 @@
-﻿import hashlib, hmac, json, os, random, smtplib, time, urllib.parse, urllib.request
+﻿                                        #server.py
+
+import hashlib, hmac, json, os, random, smtplib, time, urllib.parse, urllib.request
 from datetime import datetime
 from email.message import EmailMessage
 from flask import Flask, jsonify, request, send_file, send_from_directory
