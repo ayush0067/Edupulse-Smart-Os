@@ -1,9 +1,9 @@
-﻿import base64, hashlib, hmac, json, time, urllib.parse, urllib.request
+﻿import hashlib, hmac, json, random, time, urllib.parse, urllib.request
 from datetime import datetime
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from backend.database import (
     init_db, load_saved_state, sync_full_state, get_connection,
-    append_ledger_block, verify_ledger_chain
+    append_ledger_block, verify_ledger_chain, log_otp_dispatch
 )
 from backend.hod_report_generator import build_hod_excel_report
 
@@ -50,6 +50,25 @@ def sync_state():
         return jsonify({"error": "Invalid JSON"}), 400
     sync_full_state(payload)
     return jsonify({"synced": True, "timestamp": datetime.now().isoformat()})
+
+@app.route("/api/send-sms-otp", methods=["POST"])
+def send_sms_otp():
+    data = request.get_json(silent=True) or {}
+    roll_id = data.get("roll_id", "").strip().upper()
+    mobile_no = data.get("mobile_no", "").strip()
+    if not roll_id or not mobile_no:
+        return jsonify({"error": "Roll ID and Mobile Number required"}), 400
+
+    otp_code = f"{random.randint(100000, 999999)}"
+    log_otp_dispatch(roll_id, mobile_no, otp_code, "DISPATCHED")
+    append_ledger_block(roll_id, f"OTP_DISPATCHED_TO:+91-{mobile_no[-4:]}")
+    return jsonify({
+        "sent": True,
+        "roll_id": roll_id,
+        "masked_mobile": f"+91-XXXXXX{mobile_no[-4:]}",
+        "otp": otp_code,
+        "expires_in": 60
+    })
 
 @app.route("/api/ledger-append", methods=["POST"])
 def ledger_append():
@@ -113,7 +132,7 @@ def predict_performance():
     notice = (
         f"OFFICIAL AKTU CREDIT-WEIGHTED ACADEMIC & BIOMETRIC AUDIT MEMO\n"
         f"Date: {datetime.now().strftime('%d-%b-%Y %I:%M %p')}\n"
-        f"Student: {member.get('name')} | Roll ID: {member.get('id')} | {member.get('year')}\n"
+        f"Student: {member.get('name')} | Roll ID: {member.get('id')} | Mobile: +91-{member.get('mobile', 'N/A')}\n"
         f"------------------------------------------------------------------\n"
         f"1. Precision Attendance: {att_pct:.2f}% ({tot_att}/{tot_cls} lectures)\n"
         f"2. Exam Eligibility: {elig}\n"
@@ -133,68 +152,44 @@ def scan_and_solve_question():
     img_data_url = data.get("image_base64", "")
     api_key = data.get("api_key", "").strip()
     student_info = data.get("student_info", "B.Tech CSE Student")
-
     if not img_data_url or "," not in img_data_url:
         return jsonify({"error": "No image provided"}), 400
-
     raw_b64 = img_data_url.split(",", 1)[1]
 
-    # Mode 1: Direct Multimodal Gemini Vision (Reads printed, handwritten, or diagram questions)
     if api_key:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={urllib.parse.quote(api_key)}"
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {"text": f"You are an expert B.Tech professor helping {student_info}. Read the question shown in this image, transcribe it clearly under 'TRANSCRIBED QUESTION:', and then provide a clean, step-by-step solution under 'STEP-BY-STEP SOLUTION:' with bold final answer."},
-                        {"inline_data": {"mime_type": "image/jpeg", "data": raw_b64}}
-                    ]
-                }]
-            }
+            payload = {"contents": [{"parts": [{"text": f"Transcribe and solve step-by-step for {student_info}:"}, {"inline_data": {"mime_type": "image/jpeg", "data": raw_b64}}]}]}
             req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=22) as resp:
                 res_json = json.loads(resp.read().decode("utf-8"))
-                full_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-                return jsonify({"engine": "Gemini 2.5 Vision", "extracted_text": "Scanned via Multimodal Vision", "solution": full_text})
-        except Exception as exc:
-            pass  # Fall through to OCR + Online AI Solver
+                return jsonify({"engine": "Gemini 2.5 Vision", "extracted_text": "Scanned via Vision AI", "solution": res_json["candidates"][0]["content"]["parts"][0]["text"].strip()})
+        except Exception:
+            pass
 
-    # Mode 2: Zero-Key Live OCR Extraction + Online AI Step-by-Step Solver
     extracted_text = ""
     try:
-        ocr_form = urllib.parse.urlencode({
-            "apikey": "helloworld",
-            "base64Image": img_data_url,
-            "language": "eng",
-            "isOverlayRequired": "false",
-            "OCREngine": "2"
-        }).encode("utf-8")
+        ocr_form = urllib.parse.urlencode({"apikey": "helloworld", "base64Image": img_data_url, "language": "eng", "OCREngine": "2"}).encode("utf-8")
         ocr_req = urllib.request.Request("https://api.ocr.space/parse/image", data=ocr_form, method="POST")
         with urllib.request.urlopen(ocr_req, timeout=18) as ocr_resp:
             ocr_json = json.loads(ocr_resp.read().decode("utf-8"))
-            parsed_results = ocr_json.get("ParsedResults") or []
-            if parsed_results:
-                extracted_text = parsed_results[0].get("ParsedText", "").strip()
+            parsed = ocr_json.get("ParsedResults") or []
+            if parsed:
+                extracted_text = parsed[0].get("ParsedText", "").strip()
     except Exception:
         extracted_text = ""
 
     if not extracted_text or len(extracted_text) < 4:
-        return jsonify({
-            "engine": "OCR + Live AI",
-            "extracted_text": "",
-            "solution": "⚠️ Could not detect clear printed text in the camera frame. Hold the question steady in bright light, upload a clear screenshot, or type/paste the text into the box above and click Solve."
-        })
+        return jsonify({"engine": "OCR + Live AI", "extracted_text": "", "solution": "⚠️ Could not detect clear printed text. Hold steady or type the question above."})
 
-    # Solve the extracted text via Live Online AI
     try:
-        prompt = f"Solve this B.Tech exam question step-by-step for {student_info}. Highlight formulas and the final answer clearly:\n\n{extracted_text}"
+        prompt = f"Solve this B.Tech exam question step-by-step for {student_info}:\n\n{extracted_text}"
         ai_body = json.dumps({"messages": [{"role": "user", "content": prompt}], "model": "openai"}).encode("utf-8")
-        ai_req = urllib.request.Request("https://text.pollinations.ai/", data=ai_body, headers={"Content-Type": "application/json", "User-Agent": "EduPulse-Vision/2.0"}, method="POST")
+        ai_req = urllib.request.Request("https://text.pollinations.ai/", data=ai_body, headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(ai_req, timeout=20) as ai_resp:
-            solution = ai_resp.read().decode("utf-8").strip()
-            return jsonify({"engine": "Python OCR + Live AI Solver", "extracted_text": extracted_text, "solution": solution})
+            return jsonify({"engine": "Python OCR + Live AI Solver", "extracted_text": extracted_text, "solution": ai_resp.read().decode("utf-8").strip()})
     except Exception as exc:
-        return jsonify({"engine": "OCR Only", "extracted_text": extracted_text, "solution": f"Extracted Question:\n{extracted_text}\n\n(AI solver busy: {exc})"})
+        return jsonify({"engine": "OCR Only", "extracted_text": extracted_text, "solution": f"Extracted:\n{extracted_text}\n({exc})"})
 
 @app.route("/api/ai-ask", methods=["POST"])
 def python_ai_relay():
@@ -203,9 +198,9 @@ def python_ai_relay():
     student_info = data.get("student_info", "B.Tech CSE Student")
     if not question:
         return jsonify({"error": "Empty question"}), 400
-    prompt = f"You are EduPulse Precision AI Tutor assisting {student_info}. Answer with exact formulas, step-by-step clarity, and bold key terms:\n\n{question}"
+    prompt = f"You are EduPulse Precision AI Tutor assisting {student_info}. Answer with formulas, step-by-step clarity, and bold key terms:\n\n{question}"
     body = json.dumps({"messages": [{"role": "user", "content": prompt}], "model": "openai"}).encode("utf-8")
-    req = urllib.request.Request("https://text.pollinations.ai/", data=body, headers={"Content-Type": "application/json", "User-Agent": "EduPulse-Python/2.0"}, method="POST")
+    req = urllib.request.Request("https://text.pollinations.ai/", data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=18) as resp:
             return jsonify({"answer": resp.read().decode("utf-8").strip()})

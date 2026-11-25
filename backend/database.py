@@ -22,6 +22,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS students (
                 roll_id TEXT PRIMARY KEY,
                 full_name TEXT NOT NULL,
+                mobile_no TEXT DEFAULT '',
                 program_year TEXT NOT NULL,
                 approval_status TEXT NOT NULL,
                 face_registered INTEGER DEFAULT 0,
@@ -38,6 +39,14 @@ def init_db():
                 subject TEXT NOT NULL,
                 confidence TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS otp_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                roll_id TEXT NOT NULL,
+                mobile_no TEXT NOT NULL,
+                otp_code TEXT NOT NULL,
+                status TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS audit_ledger (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -47,7 +56,11 @@ def init_db():
                 record_hash TEXT NOT NULL
             );
         """)
-        # Seed genesis block if empty
+        # Migrate existing students table if mobile_no column is missing
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(students)").fetchall()]
+        if "mobile_no" not in cols:
+            conn.execute("ALTER TABLE students ADD COLUMN mobile_no TEXT DEFAULT ''")
+
         count = conn.execute("SELECT COUNT(*) FROM audit_ledger").fetchone()[0]
         if count == 0:
             ts = datetime.now().isoformat()
@@ -56,6 +69,14 @@ def init_db():
                 "INSERT INTO audit_ledger (timestamp, roll_id, action, prev_hash, record_hash) VALUES (?, ?, ?, ?, ?)",
                 (ts, "SYSTEM", "GENESIS_BLOCK", "0" * 64, genesis_hash),
             )
+
+def log_otp_dispatch(roll_id: str, mobile_no: str, otp_code: str, status: str = "SENT"):
+    init_db()
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO otp_logs (created_at, roll_id, mobile_no, otp_code, status) VALUES (?, ?, ?, ?, ?)",
+            (datetime.now().isoformat(), roll_id, mobile_no, otp_code, status),
+        )
 
 def append_ledger_block(roll_id: str, action: str):
     init_db()
@@ -116,8 +137,8 @@ def sync_full_state(state: dict):
             avg_score = sum(s.get("internal", 0) + s.get("midterm", 0) + s.get("assignments", 0) for s in subjects) / len(subjects) if subjects else 0.0
             cgpa = round(min(10.0, avg_score / 9.5), 2)
             conn.execute(
-                "INSERT INTO students VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (m.get("id", ""), m.get("name", ""), m.get("year", ""), m.get("status", "pending"),
+                "INSERT INTO students (roll_id, full_name, mobile_no, program_year, approval_status, face_registered, xp_points, overall_attendance, cgpa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (m.get("id", ""), m.get("name", ""), m.get("mobile", ""), m.get("year", ""), m.get("status", "pending"),
                  1 if m.get("faceRegistered") else 0, m.get("xp", 0), att_pct, cgpa)
             )
 

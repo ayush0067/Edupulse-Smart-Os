@@ -4,11 +4,14 @@ let prevFrameLuma = null;
 let liveHumanConfirmed = false;
 let qScannerStream = null;
 let autoCheckInCooldown = false;
+let liveSyncChannel = null;
+let cloudEventSource = null;
 
 const CREDITS_MAP = { 'BCS-301': 4, 'BCS-302': 4, 'BCS-303': 4, 'BAS-303': 4, 'BCS-401': 4, 'BCS-403': 4, 'BCS-502': 3 };
 
 document.addEventListener('DOMContentLoaded', async () => {
   await checkPythonBackend();
+  initRealTimeDatabaseSync();
   upgradeAdvancedFaceSystem();
   injectQuestionCameraScanner();
   upgradePrecisionRewards();
@@ -18,12 +21,123 @@ document.addEventListener('DOMContentLoaded', async () => {
   await refreshPredictiveAnalytics();
 });
 
+// =========================================================================
+// 0. REAL-TIME MULTI-TAB + LIVE CLOUD + SQLITE3 DATABASE SYNC ENGINE
+// =========================================================================
+function initRealTimeDatabaseSync() {
+  const roomInput = document.getElementById('sync-room-input');
+  if (roomInput) roomInput.value = state.syncRoom || 'edupulse-ayush0067-live';
+
+  document.getElementById('apply-sync-room-btn')?.addEventListener('click', () => {
+    const newRoom = roomInput.value.trim().replace(/[^a-zA-Z0-9-_]/g, '');
+    if (!newRoom) return;
+    state.syncRoom = newRoom;
+    window.saveState(state);
+    connectCloudLiveStream(newRoom);
+    showToast(`🌐 Connected to Live Cloud Room: ${newRoom}`);
+  });
+
+  document.getElementById('force-sync-now-btn')?.addEventListener('click', async () => {
+    await broadcastAndPushState(state);
+    showToast('🔄 Pushed latest database snapshot to all live clients!');
+  });
+
+  // 1. Instant Same-Browser Multi-Tab Real-Time Channel
+  if ('BroadcastChannel' in window) {
+    liveSyncChannel = new BroadcastChannel('edupulse_realtime_db');
+    liveSyncChannel.onmessage = event => {
+      if (event.data?.type === 'STATE_SYNC') applyIncomingLiveState(event.data.payload, 'Tab Sync');
+    };
+  }
+
+  window.addEventListener('storage', e => {
+    if (e.key === STORAGE_KEY && e.newValue) {
+      try { applyIncomingLiveState(JSON.parse(e.newValue), 'Local Storage'); } catch {}
+    }
+  });
+
+  // 2. Cross-Device Live Cloud Pub/Sub Stream (Works on GitHub Pages HTTPS)
+  connectCloudLiveStream(state.syncRoom || 'edupulse-ayush0067-live');
+
+  // 3. Python SQLite3 Live Poll (If running server.py)
+  setInterval(async () => {
+    if (!pythonOnline) return;
+    try {
+      const r = await fetch('/api/state');
+      const j = await r.json();
+      if (j.found && j.state) applyIncomingLiveState(j.state, 'SQLite3 DB');
+    } catch {}
+  }, 4000);
+}
+
+function connectCloudLiveStream(roomName) {
+  if (cloudEventSource) {
+    cloudEventSource.close();
+    cloudEventSource = null;
+  }
+  try {
+    cloudEventSource = new EventSource(`https://ntfy.sh/${encodeURIComponent(roomName)}/sse`);
+    cloudEventSource.onmessage = ev => {
+      try {
+        const wrapper = JSON.parse(ev.data);
+        if (wrapper.message) {
+          const remoteState = JSON.parse(wrapper.message);
+          applyIncomingLiveState(remoteState, 'Live Cloud');
+        }
+      } catch {}
+    };
+  } catch {}
+}
+
+function applyIncomingLiveState(incoming, sourceLabel) {
+  if (!incoming || !incoming.members) return;
+  if ((incoming.updatedAt || 0) <= (state.updatedAt || 0)) return;
+
+  const currentSession = state.session;
+  const currentActiveIdx = state.activeMemberIndex;
+  state = incoming;
+  state.session = currentSession;
+  if (currentActiveIdx < state.members.length) state.activeMemberIndex = currentActiveIdx;
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  updatePendingBadges();
+  if (state.session) {
+    renderAll();
+  }
+  const tsEl = document.getElementById('live-sync-timestamp');
+  if (tsEl) tsEl.textContent = `Last real-time update via ${sourceLabel} at ${new Date().toLocaleTimeString()}`;
+}
+
+async function broadcastAndPushState(currentState) {
+  if (liveSyncChannel) {
+    liveSyncChannel.postMessage({ type: 'STATE_SYNC', payload: currentState });
+  }
+  if (pythonOnline) {
+    await syncToPythonSQLite(currentState);
+  }
+  // Push lightweight state (without heavy base64 images if > 3.5KB) to Cloud Pub/Sub
+  try {
+    const room = currentState.syncRoom || 'edupulse-ayush0067-live';
+    const compact = structuredClone(currentState);
+    compact.members.forEach(m => { delete m.facePhoto; delete m.faceTemplates; });
+    const serialized = JSON.stringify(compact);
+    if (serialized.length < 3800) {
+      await fetch(`https://ntfy.sh/${encodeURIComponent(room)}`, {
+        method: 'POST',
+        body: serialized
+      });
+    }
+  } catch {}
+
+  const tsEl = document.getElementById('live-sync-timestamp');
+  if (tsEl) tsEl.textContent = `Synced to Live Database at ${new Date().toLocaleTimeString()}`;
+}
+
 async function checkPythonBackend() {
   try {
     const res = await fetch('/api/health');
     if (!res.ok) return;
-    const info = await res.json();
-    pythonOnline = info.status === 'online';
+    pythonOnline = true;
     const stateRes = await fetch('/api/state');
     const stateJson = await stateRes.json();
     if (stateJson.found && stateJson.state) {
@@ -40,7 +154,7 @@ function hookSaveStateToPython() {
   const orig = window.saveState;
   window.saveState = function (s) {
     orig(s);
-    if (pythonOnline) syncToPythonSQLite(s);
+    broadcastAndPushState(s);
     refreshPredictiveAnalytics();
     updateScholarBadge();
   };
@@ -68,6 +182,9 @@ async function recordTamperProofEvent(rollId, action) {
   } catch {}
 }
 
+// =========================================================================
+// 1. ADVANCED 3-POSE BIOMETRIC FACE REGISTRATION + LIVENESS + GEOFENCE
+// =========================================================================
 function upgradeAdvancedFaceSystem() {
   window.extractFaceDescriptor = function (videoEl) {
     const canvas = document.getElementById('face-process-canvas');
@@ -283,6 +400,9 @@ function upgradeAdvancedFaceSystem() {
   }
 }
 
+// =========================================================================
+// 2. CAMERA QUESTION SCANNER (WEBCAM OCR + IMAGE UPLOAD + AI SOLVER)
+// =========================================================================
 function injectQuestionCameraScanner() {
   const solverView = document.getElementById('view-solver');
   const solverLayout = solverView?.querySelector('.solver-layout');
@@ -418,7 +538,6 @@ async function processScannedImage(imageDataUrl) {
       });
       data = await res.json();
     } else {
-      // Direct Cloud OCR + AI Fallback for GitHub Pages Static Hosting
       const form = new URLSearchParams({ apikey: 'helloworld', base64Image: imageDataUrl, language: 'eng', OCREngine: '2' });
       const ocrRes = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
       const ocrJson = await ocrRes.json();
@@ -507,7 +626,7 @@ function injectPythonWidgets() {
     pill.id = 'python-status-pill';
     pill.className = 'badge badge-cyan';
     pill.style.padding = '7px 12px';
-    pill.textContent = pythonOnline ? '🐍 Python + SQLite3' : '☁️ GitHub Live Cloud';
+    pill.textContent = pythonOnline ? '🐍 Python + SQLite3' : '☁️ Live Cloud DB';
     topbar.prepend(pill);
   }
 
@@ -594,7 +713,6 @@ async function refreshPredictiveAnalytics() {
     }
   } catch {}
 
-  // Static GitHub Pages Fallback Calculation
   const totAtt = m.subjects.reduce((s, x) => s + x.attended, 0);
   const totCls = m.subjects.reduce((s, x) => s + x.total, 0);
   const attPct = totCls ? Number(((totAtt / totCls) * 100).toFixed(2)) : 0;
@@ -613,7 +731,7 @@ async function refreshPredictiveAnalytics() {
     eligibility: attPct >= 85 ? 'ELIGIBLE (+5 Sessional Merit Bonus)' : attPct >= 75 ? 'ELIGIBLE (Standard Clearance)' : 'DETAINED RISK (<75%)',
     risk_level: attPct < 75 ? 'HIGH' : 'LOW',
     low_subjects: lowSubs,
-    official_notice: `OFFICIAL AKTU AUDIT MEMO\nStudent: ${m.name} (${m.id}) | ${m.year}\nAttendance: ${attPct}% | Credit-Weighted SGPA: ${sgpa}/10.00\nDetainment Risk: ${lowSubs.length ? lowSubs.join(', ') : 'None (All Clear)'}`
+    official_notice: `OFFICIAL AKTU AUDIT MEMO\nStudent: ${m.name} (${m.id}) | Mobile: +91-${m.mobile || 'N/A'}\nAttendance: ${attPct}% | Credit-Weighted SGPA: ${sgpa}/10.00`
   });
 }
 
@@ -643,7 +761,6 @@ async function updateDynamicQRToken() {
     }
   } catch {}
 
-  // Web Crypto Fallback for GitHub Pages
   const win = Math.floor(Date.now() / 60000);
   const left = 60 - Math.floor((Date.now() / 1000) % 60);
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${m.id}:${win}`));
