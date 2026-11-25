@@ -1,0 +1,571 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduPulse Smart OS — Attendance, Face ID & AI Tutor</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="ambient-orb orb-1"></div>
+  <div class="ambient-orb orb-2"></div>
+
+  <!-- AUTHENTICATION, SELF-REGISTRATION, FORGOT PASSWORD & COORDINATOR PORTAL -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-card">
+      <div class="brand" style="margin-bottom: 8px;">
+        <div class="brand-icon">EP</div>
+        <div>
+          <h2>EduPulse Smart OS</h2>
+          <span>B.Tech Attendance, Face ID & AI Learning Portal</span>
+        </div>
+      </div>
+
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab-btn active" data-auth-tab="student-login">🎓 Sign In</button>
+        <button type="button" class="auth-tab-btn" data-auth-tab="student-register">📝 Register Yourself</button>
+        <button type="button" class="auth-tab-btn" data-auth-tab="coordinator-login">🛡️ Coordinator</button>
+      </div>
+
+      <div id="auth-alert-box" class="auth-alert"></div>
+
+      <!-- TAB 1: STUDENT SIGN IN -->
+      <div id="panel-student-login" class="auth-panel active">
+        <form id="student-login-form">
+          <div class="auth-field">
+            <div class="auth-field-header"><label>Student Roll ID</label></div>
+            <input type="text" id="login-roll-id" placeholder="e.g. CS-067" required />
+          </div>
+          <div class="auth-field">
+            <div class="auth-field-header">
+              <label>Password</label>
+              <button type="button" id="open-forgot-btn" class="link-btn">Forgot Password?</button>
+            </div>
+            <div class="pass-wrap">
+              <input type="password" id="login-password" placeholder="Enter password" required />
+              <button type="button" class="eye-btn" onclick="togglePasswordField('login-password', this)">👁️</button>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Sign In Automatically ➤</button>
+        </form>
+
+        <button type="button" id="face-login-toggle-btn" class="btn-outline" style="width:100%; margin-top:10px;">
+          📷 Instant Sign In with Face ID
+        </button>
+
+        <div id="face-login-box" style="display:none; margin-top:12px; text-align:center;">
+          <video id="face-login-video" autoplay playsinline muted style="width:100%; border-radius:12px; border:1px solid var(--cyan); transform:scaleX(-1);"></video>
+          <small id="face-login-status" style="color:var(--cyan); display:block; margin-top:6px;">Initializing camera...</small>
+        </div>
+
+        <div class="demo-pills">
+          <span style="font-size:0.74rem; color:var(--text-muted); width:100%;">Quick Demo Fill:</span>
+          <button type="button" class="demo-pill" onclick="fillDemoLogin('CS-067','pass123')">Ayush (Approved)</button>
+          <button type="button" class="demo-pill" onclick="fillDemoLogin('CS-091','pass123')">Rahul (Pending Approval)</button>
+        </div>
+      </div>
+
+      <!-- PANEL: FORGOT PASSWORD -->
+      <div id="panel-forgot-password" class="auth-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <strong style="font-size:0.98rem;">🔑 Reset Student Password</strong>
+          <button type="button" id="back-to-login-btn" class="link-btn">← Back to Sign In</button>
+        </div>
+        <form id="forgot-password-form">
+          <div class="auth-field">
+            <label>Enter Your Registered Roll ID</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="forgot-roll-id" placeholder="e.g. CS-067" required />
+              <button type="button" id="send-otp-btn" class="btn-outline" style="white-space:nowrap;">Send OTP</button>
+            </div>
+          </div>
+          <div id="otp-display-banner" class="otp-banner" style="display:none;"></div>
+          <div id="forgot-step-2" style="display:none;">
+            <div class="auth-field">
+              <label>6-Digit Verification OTP</label>
+              <input type="text" id="forgot-otp-input" placeholder="Enter 6-digit OTP" maxlength="6" required />
+            </div>
+            <div class="auth-field">
+              <label>New Password</label>
+              <div class="pass-wrap">
+                <input type="password" id="forgot-new-pass" placeholder="Min 4 characters" minlength="4" required />
+                <button type="button" class="eye-btn" onclick="togglePasswordField('forgot-new-pass', this)">👁️</button>
+              </div>
+            </div>
+            <div class="auth-field">
+              <label>Confirm New Password</label>
+              <input type="password" id="forgot-confirm-pass" placeholder="Re-enter new password" minlength="4" required />
+            </div>
+            <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Update Password & Continue ✓</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- TAB 2: STUDENT SELF-REGISTRATION -->
+      <div id="panel-student-register" class="auth-panel">
+        <form id="student-register-form">
+          <div class="auth-field">
+            <label>Full Name</label>
+            <input type="text" id="reg-name" placeholder="Enter your full name" required />
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div class="auth-field">
+              <label>Roll ID</label>
+              <input type="text" id="reg-roll-id" placeholder="e.g. CS-105" required />
+            </div>
+            <div class="auth-field">
+              <label>B.Tech Year</label>
+              <select id="reg-year">
+                <option value="B.Tech 2nd Year CSE">2nd Year CSE</option>
+                <option value="B.Tech 3rd Year CSE">3rd Year CSE</option>
+              </select>
+            </div>
+          </div>
+          <div class="auth-field">
+            <label>Create Password</label>
+            <div class="pass-wrap">
+              <input type="password" id="reg-password" placeholder="Min 4 characters" minlength="4" required />
+              <button type="button" class="eye-btn" onclick="togglePasswordField('reg-password', this)">👁️</button>
+            </div>
+          </div>
+          <div class="auth-field" style="display:flex; align-items:center; gap:10px;">
+            <button type="button" id="reg-capture-face-btn" class="btn-outline" style="flex:1;">📷 Optional: Capture Face ID</button>
+            <img id="reg-face-preview" style="display:none; width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--green);" alt="Preview" />
+          </div>
+          <video id="reg-video" autoplay playsinline muted style="display:none; width:100%; border-radius:10px; margin-bottom:10px; transform:scaleX(-1);"></video>
+          <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Submit Registration for Approval ✓</button>
+        </form>
+      </div>
+
+      <!-- TAB 3: COORDINATOR / HOD LOGIN -->
+      <div id="panel-coordinator-login" class="auth-panel">
+        <form id="coordinator-login-form">
+          <div class="auth-field">
+            <label>Coordinator / HOD ID</label>
+            <input type="text" id="coord-id" placeholder="HOD-ADMIN" required />
+          </div>
+          <div class="auth-field">
+            <label>Coordinator Password</label>
+            <div class="pass-wrap">
+              <input type="password" id="coord-password" placeholder="••••••••" required />
+              <button type="button" class="eye-btn" onclick="togglePasswordField('coord-password', this)">👁️</button>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Open Coordinator Approval Panel ➤</button>
+        </form>
+        <div class="demo-pills">
+          <button type="button" class="demo-pill" onclick="fillCoordinatorDemo()">Auto-Fill Coordinator (HOD-ADMIN / admin123)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APPLICATION SHELL -->
+  <div class="app-layout" id="app-layout" style="display:none;">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">EP</div>
+        <div>
+          <h2>EduPulse</h2>
+          <span>Smart Student OS</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-btn active" data-view="dashboard">📊 Dashboard</button>
+        <button class="nav-btn" data-view="attendance">📅 Attendance</button>
+        <button class="nav-btn" data-view="live">📡 Live Face Attendance</button>
+        <button class="nav-btn" data-view="academics">🎓 Academics & Insights</button>
+        <button class="nav-btn" data-view="solver">🧠 Problem Solver</button>
+        <button class="nav-btn" data-view="bot">🤖 AI Learning Bot</button>
+        <button class="nav-btn" data-view="rewards">🏆 Rewards & Streaks</button>
+        <button class="nav-btn" id="nav-coordinator-btn" data-view="coordinator" style="display:none;">
+          🛡️ Approvals <span id="coord-pending-badge" class="badge badge-amber" style="margin-left:6px;">1</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="streak-mini">
+          <span class="streak-fire">🔥</span>
+          <div>
+            <strong id="sidebar-streak">12 Day Streak</strong>
+            <small id="sidebar-xp">1,450 XP</small>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <h1 id="page-title">Dashboard Overview</h1>
+          <p id="page-subtitle">Real-time attendance, biometric verification & AI study insights</p>
+        </div>
+
+        <div class="topbar-actions">
+          <select id="member-switcher" class="select-input" title="Switch Active Student Profile"></select>
+          <div class="xp-pill">⚡ <span id="top-xp">1,450</span> XP</div>
+
+          <div class="profile-chip">
+            <img id="top-face-thumb" class="avatar-img" style="display:none;" alt="Face" />
+            <div id="top-avatar-initials" class="avatar">AK</div>
+            <div>
+              <strong id="student-name">Ayush Kumar Modanwal</strong>
+              <small id="student-id">ID: CS-067</small>
+            </div>
+          </div>
+
+          <button id="signout-btn" class="btn-outline" title="Sign Out">🚪 Sign Out</button>
+        </div>
+      </header>
+
+      <!-- VIEW 1: DASHBOARD -->
+      <section id="view-dashboard" class="view active">
+        <div class="kpi-grid">
+          <div class="kpi-card cyan">
+            <span class="kpi-label">Overall Attendance</span>
+            <h3 id="kpi-attendance">0%</h3>
+            <small id="kpi-attendance-note">Target: 75% minimum</small>
+          </div>
+          <div class="kpi-card purple">
+            <span class="kpi-label">Current CGPA</span>
+            <h3 id="kpi-cgpa">0.0</h3>
+            <small id="kpi-year-tag">B.Tech 2nd Year CSE</small>
+          </div>
+          <div class="kpi-card green">
+            <span class="kpi-label">Reward Points</span>
+            <h3 id="kpi-xp">0 XP</h3>
+            <small id="kpi-rank">Rank: Gold Scholar</small>
+          </div>
+          <div class="kpi-card amber">
+            <span class="kpi-label">Registered Faces</span>
+            <h3 id="kpi-faces">0 / 6</h3>
+            <small>Biometric roster status</small>
+          </div>
+        </div>
+
+        <div class="charts-grid">
+          <div class="glass-card span-2">
+            <div class="card-header">
+              <h3>Student Performance Overview</h3>
+              <span class="badge badge-cyan">Semester Trend</span>
+            </div>
+            <div class="chart-wrap"><canvas id="performanceChart"></canvas></div>
+          </div>
+
+          <div class="glass-card">
+            <div class="card-header">
+              <h3>Attendance Data</h3>
+              <span class="badge badge-purple">By Subject</span>
+            </div>
+            <div class="chart-wrap"><canvas id="attendanceBarChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="bottom-grid">
+          <div class="glass-card">
+            <div class="card-header"><h3>Recent Activity</h3></div>
+            <ul id="recent-activity-list" class="activity-list"></ul>
+          </div>
+
+          <div class="glass-card">
+            <div class="card-header"><h3>Grade Distribution Analysis</h3></div>
+            <div class="chart-wrap small"><canvas id="gradePieChart"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 2: ATTENDANCE -->
+      <section id="view-attendance" class="view">
+        <div class="section-toolbar">
+          <p>Once marked for today, attendance is <strong>permanently locked (Cannot Reverse)</strong>. Earn <strong>+25 XP</strong> per class.</p>
+          <button id="reset-demo-btn" class="btn-outline">Reset Demo Data</button>
+        </div>
+        <div id="attendance-cards-grid" class="subject-grid"></div>
+      </section>
+
+      <!-- VIEW 3: LIVE FACE REGISTRATION & BIOMETRIC ATTENDANCE -->
+      <section id="view-live" class="view">
+        <div class="live-grid">
+          <div class="glass-card">
+            <div class="card-header">
+              <h3><span class="live-dot"></span>Live Face Recognition Scanner</h3>
+              <span id="live-clock" class="badge badge-cyan">--:--:--</span>
+            </div>
+
+            <div class="camera-box" id="camera-box">
+              <video id="live-video" autoplay playsinline muted></video>
+              <div class="face-reticle" id="face-reticle">
+                <span class="reticle-label" id="reticle-label">SCANNING FACE...</span>
+              </div>
+              <div class="scan-line"></div>
+              <div id="camera-placeholder" style="color: var(--text-muted); text-align:center; padding:16px;">
+                Click <strong>Start Camera</strong> to register faces or scan live attendance.
+              </div>
+            </div>
+
+            <canvas id="face-process-canvas" width="160" height="160" style="display:none;"></canvas>
+
+            <div id="face-match-banner" class="match-status-bar">Biometric Status: Camera Standby</div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:12px;">
+              <div>
+                <label style="font-size:0.75rem; color:var(--text-muted); display:block; margin-bottom:4px;">Select Member</label>
+                <select id="live-member-select" class="select-input" style="width:100%;"></select>
+              </div>
+              <div>
+                <label style="font-size:0.75rem; color:var(--text-muted); display:block; margin-bottom:4px;">Select Lecture Subject</label>
+                <select id="live-subject-select" class="select-input" style="width:100%;"></select>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap;">
+              <button id="start-cam-btn" class="btn-outline">📷 Start Camera</button>
+              <button id="register-face-btn" class="btn-outline" disabled>🪪 Register Face ID</button>
+              <button id="verify-live-btn" class="btn-primary" disabled style="flex:1;">✅ Verify Face & Mark Present</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="glass-card">
+              <div class="card-header">
+                <h3>👥 Batch Members & Face Registry (<span id="roster-count">6</span>)</h3>
+                <button id="toggle-add-member-btn" class="btn-outline">+ Add Member</button>
+              </div>
+
+              <form id="add-member-form" style="display:none; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+                <input type="text" id="new-member-name" placeholder="Full Name" required class="select-input" style="flex:1;" />
+                <input type="text" id="new-member-id" placeholder="Roll ID (e.g. CS-099)" required class="select-input" style="width:140px;" />
+                <select id="new-member-year" class="select-input">
+                  <option value="B.Tech 2nd Year CSE">2nd Year</option>
+                  <option value="B.Tech 3rd Year CSE">3rd Year</option>
+                </select>
+                <button type="submit" class="btn-primary">Save</button>
+              </form>
+
+              <div class="table-wrap" style="max-height: 220px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Face</th>
+                      <th>Student</th>
+                      <th>Att %</th>
+                      <th>Biometric ID</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="members-roster-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="glass-card">
+              <div class="card-header">
+                <h3>📋 Verified Live Session Log</h3>
+                <button id="export-hod-btn" class="btn-primary">📥 Export HOD CSV</button>
+              </div>
+              <div class="table-wrap" style="max-height: 190px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Student</th>
+                      <th>Subject</th>
+                      <th>Match</th>
+                    </tr>
+                  </thead>
+                  <tbody id="live-log-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 4: ACADEMICS -->
+      <section id="view-academics" class="view">
+        <div class="insights-banner glass-card" id="study-insights-box"></div>
+        <div class="glass-card">
+          <div class="card-header"><h3>Academic Marks & Subject Breakdown</h3></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Subject</th>
+                  <th>Internal (30)</th>
+                  <th>Midterm (30)</th>
+                  <th>Assignments (40)</th>
+                  <th>Total %</th>
+                  <th>Grade</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="academics-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 5: PROBLEM SOLVER -->
+      <section id="view-solver" class="view">
+        <div class="section-toolbar">
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <span id="solver-progress-badge" class="badge badge-cyan">0 / 80 Locked</span>
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="auto-next-toggle" checked /> Auto-Next Question
+            </label>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="ai-generate-btn" class="btn-primary">✨ AI New Questions</button>
+            <button id="set-apikey-btn" class="btn-outline">🔑 Set Gemini Key</button>
+          </div>
+        </div>
+
+        <div class="solver-layout">
+          <div class="glass-card">
+            <div class="card-header">
+              <h3>2nd Yr B.Tech Bank</h3>
+              <select id="solver-subject-filter" class="select-input">
+                <option value="ALL">All Subjects</option>
+                <option value="DSA">DSA</option>
+                <option value="Engg Math">Engg Math</option>
+                <option value="COA">COA</option>
+                <option value="OS & DBMS">OS & DBMS</option>
+              </select>
+            </div>
+            <div id="question-list" class="question-list" style="max-height: 480px; overflow-y: auto; padding-right: 4px;"></div>
+          </div>
+
+          <div class="glass-card" id="question-workspace">
+            <div class="empty-state">Select a problem on the left or click "✨ AI New Questions" to begin.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 6: LIVE ONLINE AI LEARNING BOT -->
+      <section id="view-bot" class="view">
+        <div class="glass-card bot-container">
+          <div class="card-header">
+            <div>
+              <h3>🤖 EduPulse Live AI Study Tutor <span class="badge badge-green" style="margin-left:6px;">🟢 Online Live</span></h3>
+              <small style="color: var(--text-muted);">Ask ANY question online (B.Tech subjects, coding, math, science) & earn +10 XP</small>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button id="bot-apikey-btn" class="btn-outline">🔑 Optional Gemini Key</button>
+              <button id="bot-clear-btn" class="btn-outline">Clear Chat</button>
+            </div>
+          </div>
+
+          <div class="bot-chips">
+            <button type="button" class="bot-chip" data-prompt="Analyze my weakest subject and give a 3-step study plan">🎯 Weak Subject Plan</button>
+            <button type="button" class="bot-chip" data-prompt="Explain OS Deadlocks & Coffman conditions with example">⚙️ OS Deadlocks</button>
+            <button type="button" class="bot-chip" data-prompt="Explain DBMS Normalization 1NF, 2NF, 3NF and BCNF simply">🗄️ DBMS Normalization</button>
+            <button type="button" class="bot-chip" data-prompt="Explain Dijkstra's shortest path algorithm step by step">🌲 Dijkstra's Algorithm</button>
+            <button type="button" class="bot-chip" data-prompt="Explain TCP 3-way handshake vs UDP">🌐 TCP vs UDP</button>
+          </div>
+
+          <div id="bot-messages" class="bot-messages"></div>
+
+          <form id="bot-chat-form" class="bot-input-row">
+            <input type="text" id="bot-user-input" placeholder="Ask ANY question online (e.g., Write C++ code for Merge Sort, Explain Fourier Series)..." autocomplete="off" />
+            <button type="submit" class="btn-primary">Ask Live AI ➤</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- VIEW 7: REWARDS -->
+      <section id="view-rewards" class="view">
+        <div class="kpi-grid">
+          <div class="kpi-card green">
+            <span class="kpi-label">Available Balance</span>
+            <h3 id="rewards-xp-balance">0 XP</h3>
+            <small>Earned from attendance, Face ID & problem solving</small>
+          </div>
+          <div class="kpi-card amber">
+            <span class="kpi-label">Attendance Streak</span>
+            <h3 id="rewards-streak">12 Days</h3>
+            <small>Next milestone: 15 Days (+200 XP)</small>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-header"><h3>Badges & Unlockable Rewards</h3></div>
+          <div id="rewards-grid" class="rewards-grid"></div>
+        </div>
+      </section>
+
+      <!-- VIEW 8: COORDINATOR APPROVAL PORTAL -->
+      <section id="view-coordinator" class="view">
+        <div class="kpi-grid">
+          <div class="kpi-card amber">
+            <span class="kpi-label">Pending Approvals</span>
+            <h3 id="coord-kpi-pending">0</h3>
+            <small>Awaiting coordinator sign-off</small>
+          </div>
+          <div class="kpi-card green">
+            <span class="kpi-label">Approved Students</span>
+            <h3 id="coord-kpi-approved">0</h3>
+            <small>Active sign-in enabled</small>
+          </div>
+          <div class="kpi-card cyan">
+            <span class="kpi-label">Enrolled Face IDs</span>
+            <h3 id="coord-kpi-faces">0 / 0</h3>
+            <small>Biometric attendance ready</small>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-header">
+            <h3>⏳ Pending Student Self-Registrations</h3>
+            <span class="badge badge-amber">Action Required</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Face</th>
+                  <th>Student Name</th>
+                  <th>Roll ID</th>
+                  <th>Program</th>
+                  <th>Coordinator Decision</th>
+                </tr>
+              </thead>
+              <tbody id="pending-approvals-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-header"><h3>📋 All Batch Students & Access Control</h3></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Roll ID</th>
+                  <th>Name</th>
+                  <th>Year</th>
+                  <th>Approval Status</th>
+                  <th>Access & Password Control</th>
+                </tr>
+              </thead>
+              <tbody id="all-members-admin-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/questionBank.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/studyBot.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/pythonBridge.js"></script>
+</body>
+</html>
