@@ -226,3 +226,17 @@ if __name__ == "__main__":
     init_db()
     print("EduPulse Production Server Running -> http://127.0.0.1:8000")
     app.run(host="127.0.0.1", port=8000, debug=False)
+
+# KIPM GIDA Campus Geofence Verification Endpoint
+import math
+@app.route("/api/verify-kipm-geofence", methods=["POST"])
+def verify_kipm_geofence():
+    data = request.get_json(silent=True) or {}
+    lat = float(data.get("lat", 0))
+    lng = float(data.get("lng", 0))
+    kipm_lat, kipm_lng, radius = 26.741022, 83.270194, 300.0
+    dlat = math.radians(kipm_lat - lat)
+    dlng = math.radians(kipm_lng - lng)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat)) * math.cos(math.radians(kipm_lat)) * math.sin(dlng / 2) ** 2
+    dist = 6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return jsonify({"inside_campus": dist <= radius, "distance_meters": round(dist, 1), "target": "KIPM GIDA (26.741022, 83.270194)"})

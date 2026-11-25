@@ -7,12 +7,37 @@ let autoCheckInCooldown = false;
 let liveSyncChannel = null;
 let cloudEventSource = null;
 
+// Official KIPM College of Engineering & Technology, Plot BL 1&2, Sector 9, GIDA
+const KIPM_CAMPUS = {
+  name: 'KIPM College of Engineering & Technology, Sector 9, GIDA',
+  lat: 26.741022,
+  lng: 83.270194,
+  radiusMeters: 300
+};
+
+const campusGeoState = {
+  ready: false,
+  insideCampus: false,
+  distanceMeters: null,
+  accuracyMeters: null,
+  lat: null,
+  lng: null,
+  error: null
+};
+
+const faceAlignmentState = {
+  aligned: false,
+  streak: 0,
+  reason: 'Camera Standby'
+};
+
 const CREDITS_MAP = { 'BCS-301': 4, 'BCS-302': 4, 'BCS-303': 4, 'BAS-303': 4, 'BCS-401': 4, 'BCS-403': 4, 'BCS-502': 3 };
 
 document.addEventListener('DOMContentLoaded', async () => {
   applyUrlCloudParams();
   await checkPythonBackend();
   await initRealTimeDatabaseSync();
+  initKipmCampusGeofence();
   upgradeAdvancedFaceSystem();
   injectQuestionCameraScanner();
   upgradePrecisionRewards();
@@ -22,16 +47,162 @@ document.addEventListener('DOMContentLoaded', async () => {
   await refreshPredictiveAnalytics();
 });
 
-// Automatically connect any student phone opening a shared ?fb=...&room=... link!
+// ================= 0. KIPM CAMPUS HAVERSINE GPS GEOFENCE ENGINE =================
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistanceLabel(meters) {
+  if (meters === null || Number.isNaN(meters)) return '--';
+  return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`;
+}
+
+function initKipmCampusGeofence() {
+  injectGeofenceBanners();
+
+  if (!navigator.geolocation) {
+    campusGeoState.ready = false;
+    campusGeoState.insideCampus = false;
+    campusGeoState.error = 'GPS not supported on this device.';
+    updateGeofenceUI();
+    return;
+  }
+
+  navigator.geolocation.watchPosition(
+    pos => {
+      const { latitude, longitude, accuracy } = pos.coords;
+      const dist = haversineMeters(latitude, longitude, KIPM_CAMPUS.lat, KIPM_CAMPUS.lng);
+      campusGeoState.ready = true;
+      campusGeoState.lat = latitude;
+      campusGeoState.lng = longitude;
+      campusGeoState.accuracyMeters = Math.round(accuracy || 0);
+      campusGeoState.distanceMeters = dist;
+      campusGeoState.insideCampus = dist <= KIPM_CAMPUS.radiusMeters;
+      campusGeoState.error = null;
+      updateGeofenceUI();
+      syncVerifyButtonState();
+    },
+    err => {
+      campusGeoState.ready = false;
+      campusGeoState.insideCampus = false;
+      campusGeoState.error = err.code === 1
+        ? 'Location permission denied — Enable GPS to mark attendance at KIPM.'
+        : 'Waiting for high-accuracy GPS lock...';
+      updateGeofenceUI();
+      syncVerifyButtonState();
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+  );
+}
+
+function injectGeofenceBanners() {
+  const liveCard = document.querySelector('#view-live .live-grid > div:first-child');
+  if (liveCard && !document.getElementById('kipm-geofence-hud')) {
+    const hud = document.createElement('div');
+    hud.id = 'kipm-geofence-hud';
+    hud.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:10px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);font-size:0.8rem;line-height:1.45;';
+    hud.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong id="kipm-geo-status" style="color:var(--amber);">📡 Acquiring GPS near KIPM GIDA Building...</strong>
+        <label style="color:var(--text-main);display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.78rem;">
+          <input type="checkbox" id="auto-face-checkin-toggle" /> ⚡ Auto-Mark on Align
+        </label>
+      </div>
+      <div id="kipm-geo-coords" style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:0.72rem;margin-top:4px;">
+        Target: ${KIPM_CAMPUS.name} (${KIPM_CAMPUS.lat.toFixed(6)}°N, ${KIPM_CAMPUS.lng.toFixed(6)}°E • Radius: ${KIPM_CAMPUS.radiusMeters}m)
+      </div>
+    `;
+    liveCard.appendChild(hud);
+  }
+
+  const attToolbar = document.querySelector('#view-attendance .section-toolbar');
+  if (attToolbar && !document.getElementById('att-geofence-pill')) {
+    const pill = document.createElement('span');
+    pill.id = 'att-geofence-pill';
+    pill.className = 'badge badge-amber';
+    pill.textContent = '📡 Locating KIPM Campus GPS...';
+    attToolbar.appendChild(pill);
+  }
+}
+
+function updateGeofenceUI() {
+  const hud = document.getElementById('kipm-geofence-hud');
+  const statusEl = document.getElementById('kipm-geo-status');
+  const coordsEl = document.getElementById('kipm-geo-coords');
+  const attPill = document.getElementById('att-geofence-pill');
+
+  if (campusGeoState.error) {
+    if (hud) { hud.style.background = 'rgba(244,63,94,0.12)'; hud.style.borderColor = 'rgba(244,63,94,0.4)'; }
+    if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = `🚫 ${campusGeoState.error}`; }
+    if (attPill) { attPill.className = 'badge badge-red'; attPill.textContent = '🚫 GPS Required (KIPM GIDA)'; }
+    return;
+  }
+
+  if (!campusGeoState.ready) return;
+
+  const distTxt = formatDistanceLabel(campusGeoState.distanceMeters);
+  if (campusGeoState.insideCampus) {
+    if (hud) { hud.style.background = 'rgba(16,185,129,0.12)'; hud.style.borderColor = 'rgba(16,185,129,0.4)'; }
+    if (statusEl) { statusEl.style.color = 'var(--green)'; statusEl.textContent = `📍 INSIDE KIPM CAMPUS (${distTxt} from building • Attendance Unlocked ✓)`; }
+    if (attPill) { attPill.className = 'badge badge-green'; attPill.textContent = `📍 At KIPM Campus (${distTxt})`; }
+  } else {
+    if (hud) { hud.style.background = 'rgba(244,63,94,0.12)'; hud.style.borderColor = 'rgba(244,63,94,0.4)'; }
+    if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = `🚫 OUTSIDE KIPM CAMPUS (${distTxt} away — Must be within ${KIPM_CAMPUS.radiusMeters}m)`; }
+    if (attPill) { attPill.className = 'badge badge-red'; attPill.textContent = `🚫 Outside KIPM (${distTxt} away)`; }
+  }
+
+  if (coordsEl) {
+    coordsEl.textContent = `You: ${campusGeoState.lat.toFixed(5)}°N, ${campusGeoState.lng.toFixed(5)}°E (±${campusGeoState.accuracyMeters}m) | KIPM Target: ${KIPM_CAMPUS.lat.toFixed(5)}°N, ${KIPM_CAMPUS.lng.toFixed(5)}°E`;
+  }
+}
+
+function syncVerifyButtonState() {
+  const verifyBtn = document.getElementById('verify-live-btn');
+  if (!verifyBtn) return;
+
+  if (!liveStream) {
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = '✅ Verify Face & Mark Present';
+    return;
+  }
+
+  if (!campusGeoState.ready) {
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = '📡 Waiting for KIPM Campus GPS...';
+    return;
+  }
+
+  if (!campusGeoState.insideCampus) {
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = `🚫 Outside KIPM Building (${formatDistanceLabel(campusGeoState.distanceMeters)})`;
+    return;
+  }
+
+  if (!faceAlignmentState.aligned || matchedMemberIndex === null) {
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = `🎯 ${faceAlignmentState.reason || 'Align Face Inside Box'}`;
+    return;
+  }
+
+  const matched = state.members[matchedMemberIndex];
+  verifyBtn.disabled = false;
+  verifyBtn.textContent = `✅ Mark Present — ${matched.name} (${matchedConfidence}%)`;
+}
+
+// ================= 1. REAL-TIME LIVE CLOUD & FIREBASE SYNC =================
 function applyUrlCloudParams() {
   const params = new URLSearchParams(window.location.search);
-  const fb = params.get('fb');
-  const room = params.get('room');
-  const ep = params.get('ep');
-  const es = params.get('es');
-  const et = params.get('et');
+  const fb = params.get('fb'), room = params.get('room');
+  const ep = params.get('ep'), es = params.get('es'), et = params.get('et');
   let changed = false;
-
   if (fb) { state.firebaseUrl = fb.replace(/\/+$/, ''); changed = true; }
   if (room) { state.syncRoom = room; changed = true; }
   if (ep && es && et) { state.emailjsConfig = { publicKey: ep, serviceId: es, templateId: et }; changed = true; }
@@ -39,7 +210,6 @@ function applyUrlCloudParams() {
 }
 
 function buildSyncPayload(fullState) {
-  // Strip static questions & rewards definitions so real-time payloads stay fast & compact
   return {
     updatedAt: fullState.updatedAt || Date.now(),
     syncRoom: fullState.syncRoom,
@@ -92,19 +262,15 @@ async function initRealTimeDatabaseSync() {
       qs.set('es', state.emailjsConfig.serviceId);
       qs.set('et', state.emailjsConfig.templateId);
     }
-    const shareUrl = `${base}?${qs.toString()}`;
-    navigator.clipboard?.writeText(shareUrl);
-    showToast('🔗 Live Student Registration Link copied! Send it to students on WhatsApp.');
+    navigator.clipboard?.writeText(`${base}?${qs.toString()}`);
+    showToast('🔗 Live Student Registration Link copied!');
   });
 
   document.getElementById('wipe-all-students-btn')?.addEventListener('click', async () => {
-    if (!confirm('Remove all registered students and reset to 0 students on the Live Database?')) return;
-    state.members = [];
-    state.liveLogs = [];
-    state.activeMemberIndex = 0;
+    if (!confirm('Remove all registered students and reset to 0 on Live Database?')) return;
+    state.members = []; state.liveLogs = []; state.activeMemberIndex = 0;
     state.activities = [{ text: 'HOD cleared database — 0 students registered', time: 'Just now', tag: 'System' }];
-    window.saveState(state);
-    renderAll();
+    window.saveState(state); renderAll();
     showToast('🗑️ Student registry reset to 0 on Live DB.');
   });
 
@@ -114,7 +280,6 @@ async function initRealTimeDatabaseSync() {
     showToast('🔄 Live Database synchronized!');
   });
 
-  // 1. Instant Multi-Tab Browser Channel
   if ('BroadcastChannel' in window) {
     liveSyncChannel = new BroadcastChannel('edupulse_live_prod_channel');
     liveSyncChannel.onmessage = ev => {
@@ -128,7 +293,6 @@ async function initRealTimeDatabaseSync() {
     }
   });
 
-  // 2. Pull initial Firebase state if configured & poll every 2.5s for real-time cross-phone updates
   await pullFromFirebase();
   setInterval(async () => {
     if (state.firebaseUrl) await pullFromFirebase();
@@ -141,7 +305,6 @@ async function initRealTimeDatabaseSync() {
     }
   }, 2500);
 
-  // 3. Zero-Config Real-Time Relay Stream (ntfy.sh)
   connectCloudLiveStream(state.syncRoom || 'edupulse-live-ayush0067');
 }
 
@@ -166,9 +329,7 @@ async function pullFromFirebase() {
     const res = await fetch(`${state.firebaseUrl}/edupulse_live.json`);
     if (!res.ok) return;
     const remote = await res.json();
-    if (remote && remote.updatedAt) {
-      applyIncomingLiveState(remote, 'Firebase Realtime DB');
-    }
+    if (remote && remote.updatedAt) applyIncomingLiveState(remote, 'Firebase Realtime DB');
   } catch {}
 }
 
@@ -188,7 +349,6 @@ function connectCloudLiveStream(roomName) {
 function applyIncomingLiveState(incoming, sourceLabel) {
   if (!incoming || !Array.isArray(incoming.members)) return;
   if ((incoming.updatedAt || 0) <= (state.updatedAt || 0)) return;
-
   const prevPending = state.members.filter(m => m.status === 'pending').length;
   const newPending = incoming.members.filter(m => m.status === 'pending').length;
 
@@ -202,48 +362,33 @@ function applyIncomingLiveState(incoming, sourceLabel) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   updatePendingBadges();
   if (state.session) renderAll();
-
   if (newPending > prevPending && state.session?.role === 'coordinator') {
     showToast(`🔔 New Live Student Registration received via ${sourceLabel}!`);
   }
-
   const tsEl = document.getElementById('live-sync-timestamp');
   if (tsEl) tsEl.textContent = `Live update synced via ${sourceLabel} at ${new Date().toLocaleTimeString()}`;
 }
 
 async function broadcastAndPushState(currentState) {
   const payload = buildSyncPayload(currentState);
-
   if (liveSyncChannel) liveSyncChannel.postMessage({ type: 'STATE_SYNC', payload });
   if (pythonOnline) await syncToPythonSQLite(currentState);
-
-  // Push Full Biometric Payload to Firebase Realtime DB if configured
   if (currentState.firebaseUrl) {
     try {
       await fetch(`${currentState.firebaseUrl}/edupulse_live.json`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
     } catch {}
   }
-
-  // Push Compact Real-Time Event to ntfy.sh so open HOD tabs update instantly even without Firebase
   try {
     const compact = structuredClone(payload);
     compact.members.forEach(m => { delete m.facePhoto; delete m.faceDescriptor; delete m.faceTemplates; });
     compact.coordinators.forEach(c => { delete c.facePhoto; delete c.faceDescriptor; });
     const serialized = JSON.stringify(compact);
     if (serialized.length < 3900) {
-      await fetch(`https://ntfy.sh/${encodeURIComponent(currentState.syncRoom || 'edupulse-live-ayush0067')}`, {
-        method: 'POST',
-        body: serialized
-      });
+      await fetch(`https://ntfy.sh/${encodeURIComponent(currentState.syncRoom || 'edupulse-live-ayush0067')}`, { method: 'POST', body: serialized });
     }
   } catch {}
-
-  const tsEl = document.getElementById('live-sync-timestamp');
-  if (tsEl) tsEl.textContent = `Committed to Live Database at ${new Date().toLocaleTimeString()}`;
 }
 
 async function checkPythonBackend() {
@@ -253,11 +398,8 @@ async function checkPythonBackend() {
     pythonOnline = true;
     const stateRes = await fetch('/api/state');
     const stateJson = await stateRes.json();
-    if (stateJson.found && stateJson.state) {
-      applyIncomingLiveState(stateJson.state, 'SQLite3');
-    } else {
-      await syncToPythonSQLite(state);
-    }
+    if (stateJson.found && stateJson.state) applyIncomingLiveState(stateJson.state, 'SQLite3');
+    else await syncToPythonSQLite(state);
   } catch { pythonOnline = false; }
 }
 
@@ -285,7 +427,32 @@ async function recordTamperProofEvent(rollId, action) {
   } catch {}
 }
 
+// ================= 2. STRICT FACE ALIGNMENT + 392-D BIOMETRIC + KIPM GEOFENCE GUARD =================
 function upgradeAdvancedFaceSystem() {
+  // Enforce KIPM Geofence on manual Present marking as well
+  const origMark = window.markAttendanceForMember;
+  window.markAttendanceForMember = function (mIdx, sIdx, isPresent, viaFace = false) {
+    if (isPresent && !campusGeoState.insideCampus) {
+      const msg = campusGeoState.ready
+        ? `🚫 Blocked: You are ${formatDistanceLabel(campusGeoState.distanceMeters)} from KIPM GIDA. Must be within ${KIPM_CAMPUS.radiusMeters}m of the building.`
+        : '🚫 Blocked: Enable GPS and move within 300m of KIPM GIDA building to mark Present.';
+      showToast(msg);
+      return false;
+    }
+    return origMark(mIdx, sIdx, isPresent, viaFace);
+  };
+
+  // Override toggleCamera so Verify button ALWAYS starts locked until aligned & at KIPM
+  const origToggle = window.toggleCamera;
+  window.toggleCamera = async function () {
+    await origToggle();
+    faceAlignmentState.aligned = false;
+    faceAlignmentState.streak = 0;
+    faceAlignmentState.reason = 'Align Face Inside Box';
+    syncVerifyButtonState();
+  };
+
+  // 392-D Spatial Descriptor + Reticle Centering & Alignment Check + Liveness
   window.extractFaceDescriptor = function (videoEl) {
     const canvas = document.getElementById('face-process-canvas');
     const ctx = canvas.getContext('2d');
@@ -296,6 +463,9 @@ function upgradeAdvancedFaceSystem() {
 
     const desc = [], lumaGrid = [];
     let totalLum = 0, edgeContrastSum = 0;
+    let weightedX = 0, weightedY = 0, totalEdgeWeight = 0;
+    const coreLums = [];
+
     for (let by = 0; by < 14; by++) {
       for (let bx = 0; bx < 14; bx++) {
         let r = 0, g = 0, b = 0, c = 0;
@@ -309,11 +479,41 @@ function upgradeAdvancedFaceSystem() {
         desc.push(lum, (r - g) / (c * 255));
         lumaGrid.push(lum);
         totalLum += lum;
+        if (by >= 3 && by <= 10 && bx >= 3 && bx <= 10) coreLums.push(lum);
       }
     }
-    for (let i = 1; i < lumaGrid.length; i++) edgeContrastSum += Math.abs(lumaGrid[i] - lumaGrid[i - 1]);
+
+    // Compute edge-weighted centroid inside the 14x14 reticle to verify face alignment
+    for (let by = 1; by < 13; by++) {
+      for (let bx = 1; bx < 13; bx++) {
+        const cur = lumaGrid[by * 14 + bx];
+        const gx = Math.abs(cur - lumaGrid[by * 14 + (bx - 1)]);
+        const gy = Math.abs(cur - lumaGrid[(by - 1) * 14 + bx]);
+        const mag = gx + gy;
+        edgeContrastSum += mag;
+        weightedX += bx * mag;
+        weightedY += by * mag;
+        totalEdgeWeight += mag;
+      }
+    }
+
     const avgBrightness = (totalLum / lumaGrid.length) * 100;
-    const sharpnessScore = Math.min(99, Math.round((edgeContrastSum / lumaGrid.length) * 950));
+    const sharpnessScore = Math.min(99, Math.round((edgeContrastSum / 144) * 520));
+    const coreMean = coreLums.reduce((s, v) => s + v, 0) / coreLums.length;
+    const coreStd = Math.sqrt(coreLums.reduce((s, v) => s + (v - coreMean) ** 2, 0) / coreLums.length);
+
+    const cx = totalEdgeWeight > 0 ? (weightedX / totalEdgeWeight) / 13 : 0.5;
+    const cy = totalEdgeWeight > 0 ? (weightedY / totalEdgeWeight) / 13 : 0.5;
+
+    const centeredOk = cx >= 0.32 && cx <= 0.68 && cy >= 0.28 && cy <= 0.72;
+    const featureRich = coreStd >= 0.055 && sharpnessScore >= 18;
+    const lightingOk = avgBrightness >= 16 && avgBrightness <= 92;
+
+    let alignReason = 'Aligned ✓';
+    if (!lightingOk) alignReason = avgBrightness < 16 ? 'Too Dark — Face Light' : 'Too Bright — Reduce Glare';
+    else if (!featureRich) alignReason = 'Move Closer Inside Box';
+    else if (!centeredOk) alignReason = 'Center Face Inside Box';
+
     let motionDelta = 0.015;
     if (prevFrameLuma && prevFrameLuma.length === lumaGrid.length) {
       let diffSum = 0;
@@ -321,14 +521,16 @@ function upgradeAdvancedFaceSystem() {
       motionDelta = diffSum / lumaGrid.length;
     }
     prevFrameLuma = lumaGrid;
-    liveHumanConfirmed = motionDelta > 0.001;
+    liveHumanConfirmed = motionDelta > 0.0008;
+
     const norm = Math.sqrt(desc.reduce((s, v) => s + v * v, 0)) || 1;
     return {
       vector: desc.map(v => v / norm),
       thumbnail: canvas.toDataURL('image/jpeg', 0.85),
       brightness: Math.round(avgBrightness),
       sharpness: sharpnessScore,
-      qualityOk: avgBrightness >= 18 && avgBrightness <= 92 && sharpnessScore >= 20,
+      qualityOk: lightingOk && featureRich && centeredOk,
+      alignReason,
       livenessScore: Math.min(99.8, Math.max(45, motionDelta * 4500)).toFixed(1),
       isLive: liveHumanConfirmed
     };
@@ -344,7 +546,10 @@ function upgradeAdvancedFaceSystem() {
     if (!liveStream || video.readyState < 2) { showToast('Start camera first!'); return; }
 
     const initialSample = window.extractFaceDescriptor(video);
-    if (!initialSample.qualityOk) { showToast(`⚠️ Improve lighting or focus (Light: ${initialSample.brightness}%).`); return; }
+    if (!initialSample.qualityOk) {
+      showToast(`⚠️ Alignment Required: ${initialSample.alignReason} (Light: ${initialSample.brightness}%)`);
+      return;
+    }
 
     const idx = Number(document.getElementById('live-member-select').value);
     const m = state.members[idx];
@@ -384,39 +589,138 @@ function upgradeAdvancedFaceSystem() {
     const reticle = document.getElementById('face-reticle');
     const label = document.getElementById('reticle-label');
     const banner = document.getElementById('face-match-banner');
+
     if (faceScanTimer) clearInterval(faceScanTimer);
     faceScanTimer = setInterval(() => {
       if (!liveStream || video.readyState < 2) return;
       const sample = window.extractFaceDescriptor(video);
-      const enrolled = state.members.map((m, idx) => ({ m, idx })).filter(x => x.m.faceRegistered && x.m.faceDescriptor && x.m.faceDescriptor.length === sample.vector.length);
-      if (!enrolled.length) { banner.textContent = `⚠️ 392-D Scanner Ready (Light: ${sample.brightness}%) — Register a student face first.`; return; }
+      const enrolled = state.members
+        .map((m, idx) => ({ m, idx }))
+        .filter(x => x.m.faceRegistered && x.m.faceDescriptor && x.m.faceDescriptor.length === sample.vector.length);
+
+      if (!enrolled.length) {
+        matchedMemberIndex = null;
+        faceAlignmentState.aligned = false;
+        faceAlignmentState.streak = 0;
+        faceAlignmentState.reason = 'No Faces Enrolled';
+        banner.classList.remove('verified');
+        banner.textContent = `⚠️ Register a student Face ID first (Status: ${sample.alignReason})`;
+        syncVerifyButtonState();
+        return;
+      }
 
       let bestIdx = -1, bestSim = -1;
       enrolled.forEach(({ m, idx }) => {
         let sim = cosineSimilarity(sample.vector, m.faceDescriptor);
-        if (Array.isArray(m.faceTemplates)) m.faceTemplates.forEach(tpl => { if (tpl.length === sample.vector.length) sim = Math.max(sim, cosineSimilarity(sample.vector, tpl)); });
+        if (Array.isArray(m.faceTemplates)) {
+          m.faceTemplates.forEach(tpl => {
+            if (tpl.length === sample.vector.length) sim = Math.max(sim, cosineSimilarity(sample.vector, tpl));
+          });
+        }
         if (sim > bestSim) { bestSim = sim; bestIdx = idx; }
       });
 
       const pct = Math.min(99.7, Math.max(0, bestSim * 100)).toFixed(2);
-      if (bestSim >= 0.91 && bestIdx !== -1 && sample.isLive) {
-        matchedMemberIndex = bestIdx; matchedConfidence = pct;
+      const isAlignedAndMatched = sample.qualityOk && sample.isLive && bestSim >= 0.90 && bestIdx !== -1;
+
+      if (isAlignedAndMatched) {
+        faceAlignmentState.streak = Math.min(5, faceAlignmentState.streak + 1);
+      } else {
+        faceAlignmentState.streak = 0;
+      }
+
+      if (faceAlignmentState.streak >= 2) {
+        matchedMemberIndex = bestIdx;
+        matchedConfidence = pct;
+        faceAlignmentState.aligned = true;
+        faceAlignmentState.reason = 'Aligned & Verified ✓';
         const matched = state.members[bestIdx];
+
         reticle.classList.add('matched');
-        label.textContent = `${matched.id} • ${pct}%`;
+        label.textContent = `ALIGNED: ${matched.id} (${pct}%)`;
         banner.classList.add('verified');
-        banner.textContent = `✅ MATCHED: ${matched.name} (${pct}%) | Live:${sample.livenessScore}%`;
+        banner.textContent = `✅ ALIGNED & MATCHED: ${matched.name} (${pct}%) | Live:${sample.livenessScore}%`;
+
+        const mSel = document.getElementById('live-member-select');
+        if (mSel && mSel.value !== String(bestIdx)) {
+          mSel.value = String(bestIdx);
+          renderLiveAttendanceUI();
+        }
+
+        // Auto-mark ONLY if toggle is ON + Aligned + Matched + Inside KIPM GIDA Campus
+        if (document.getElementById('auto-face-checkin-toggle')?.checked && campusGeoState.insideCampus && !autoCheckInCooldown) {
+          const sIdx = Number(document.getElementById('live-subject-select').value);
+          if (matched.subjects[sIdx] && !matched.subjects[sIdx].todayStatus) {
+            autoCheckInCooldown = true;
+            window.verifyLiveFaceAttendance();
+            setTimeout(() => { autoCheckInCooldown = false; }, 3000);
+          }
+        }
       } else {
         matchedMemberIndex = null;
+        matchedConfidence = 0;
+        faceAlignmentState.aligned = false;
+        faceAlignmentState.reason = !sample.qualityOk
+          ? sample.alignReason
+          : !sample.isLive
+          ? 'Blink / Move Slightly'
+          : `Match ${pct}% (Need 90%+)`;
+
         reticle.classList.remove('matched');
-        label.textContent = 'SCANNING 3-POSE...';
+        label.textContent = faceAlignmentState.reason.toUpperCase();
         banner.classList.remove('verified');
-        banner.textContent = `🔍 Scanning (${pct}%) | Light:${sample.brightness}% | Live:${sample.livenessScore}%`;
+        banner.textContent = `🎯 ${faceAlignmentState.reason} | Similarity: ${pct}% | Light: ${sample.brightness}%`;
       }
-    }, 450);
+
+      syncVerifyButtonState();
+    }, 400);
+  };
+
+  // STRICT verifyLiveFaceAttendance: ZERO fallback — requires BOTH KIPM Geofence AND Live Aligned Face Match!
+  window.verifyLiveFaceAttendance = function () {
+    if (!campusGeoState.ready || !campusGeoState.insideCampus) {
+      const distTxt = campusGeoState.ready ? formatDistanceLabel(campusGeoState.distanceMeters) : 'Unknown distance';
+      showToast(`🚫 Attendance Blocked: You are ${distTxt} from KIPM GIDA building (Max allowed: ${KIPM_CAMPUS.radiusMeters}m).`);
+      return;
+    }
+
+    if (!faceAlignmentState.aligned || matchedMemberIndex === null) {
+      showToast(`🎯 Face Not Aligned: ${faceAlignmentState.reason}. Align inside the green box first.`);
+      return;
+    }
+
+    const m = state.members[matchedMemberIndex];
+    if (!m || !m.faceRegistered) {
+      showToast('No registered Face ID matched.');
+      return;
+    }
+
+    const sIdx = Number(document.getElementById('live-subject-select').value);
+    const s = m.subjects[sIdx];
+    if (!s || s.todayStatus) {
+      showToast(`🔒 ${s ? s.name : 'Subject'} is already locked for ${m.name} today!`);
+      return;
+    }
+
+    const distTag = formatDistanceLabel(campusGeoState.distanceMeters);
+    if (!window.markAttendanceForMember(matchedMemberIndex, sIdx, true, true)) return;
+
+    const now = new Date();
+    state.liveLogs.unshift({
+      date: now.toLocaleDateString(),
+      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      studentName: m.name,
+      studentId: m.id,
+      subject: `${s.code} (${s.name})`,
+      confidence: `${matchedConfidence}% Aligned • KIPM (${distTag})`
+    });
+    window.saveState(state);
+    renderLiveAttendanceUI();
+    recordTamperProofEvent(m.id, `KIPM_GEOFENCED_BIOMETRIC_PRESENT:${s.code}:${matchedConfidence}%:${distTag}`);
   };
 }
 
+// ================= 3. CAMERA QUESTION SCANNER, REWARDS & WIDGETS =================
 function injectQuestionCameraScanner() {
   const solverView = document.getElementById('view-solver');
   const solverLayout = solverView?.querySelector('.solver-layout');
@@ -493,8 +797,7 @@ async function processScannedImage(imageDataUrl) {
 
 function upgradePrecisionRewards() {
   window.claimReward = function (id) {
-    const m = getActiveMember(state);
-    const r = state.rewards.find(x => x.id === id);
+    const m = getActiveMember(state), r = state.rewards.find(x => x.id === id);
     if (!m || !r || r.claimed || m.xp < r.cost) return;
     m.xp -= r.cost; r.claimed = true;
     r.voucherCode = `EP-VOUCH-${m.id}-${Math.random().toString(16).substring(2, 6).toUpperCase()}`;
@@ -539,8 +842,8 @@ function injectPythonWidgets() {
           return [m.id, m.name, m.email || '', `+91-${m.mobile || ''}`, m.year, m.status.toUpperCase(), tot ? ((att / tot) * 100).toFixed(1) + '%' : '0%', m.xp];
         });
         const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); a.download = `HOD_Live_Report_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
-        showToast('📥 Exported HOD Live Report (.csv)!');
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); a.download = `KIPM_HOD_Report_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+        showToast('📥 Exported KIPM HOD Live Report (.csv)!');
       }
     });
   }
@@ -590,22 +893,16 @@ function injectWhatIfSimulator() {
 }
 
 async function refreshPredictiveAnalytics() {
-  const m = getActiveMember(state);
-  if (!m) return;
+  const m = getActiveMember(state); if (!m || !pythonOnline) return;
   try {
-    if (pythonOnline) {
-      const r = await fetch('/api/predict-performance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) });
-      if (r.ok) { const d = await r.json(); latestOfficialNotice = d.official_notice; }
-    }
+    const r = await fetch('/api/predict-performance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) });
+    if (r.ok) { latestOfficialNotice = (await r.json()).official_notice; }
   } catch {}
 }
 
 async function updateDynamicQRToken() {
   const m = getActiveMember(state);
-  if (!m) {
-    if (document.getElementById('qr-token-text')) document.getElementById('qr-token-text').textContent = 'REGISTER STUDENT FIRST';
-    return;
-  }
+  if (!m) { if (document.getElementById('qr-token-text')) document.getElementById('qr-token-text').textContent = 'REGISTER STUDENT FIRST'; return; }
   const win = Math.floor(Date.now() / 60000);
   const left = 60 - Math.floor((Date.now() / 1000) % 60);
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${m.id}:${win}`));
