@@ -1,4 +1,4 @@
-﻿const STORAGE_KEY = 'edupulse_student_data_v6';
+﻿const STORAGE_KEY = 'edupulse_student_data_v7';
 
 function createBTechSubjects(offsets = [0, 0, 0, 0, 0, 0, 0]) {
   const base = [
@@ -29,6 +29,21 @@ const DEFAULT_DATA = {
   session: null,
   coordinatorHash: null,
   activeMemberIndex: 0,
+  coordinators: [
+    {
+      name: 'Dr. S. K. Singh',
+      id: 'HOD-ADMIN',
+      designation: 'Head of Department (HOD)',
+      department: 'CSE & AIML',
+      mobile: '9876500001',
+      initials: 'SS',
+      status: 'approved',
+      registeredAt: 'Master Admin',
+      faceRegistered: false,
+      facePhoto: null,
+      faceDescriptor: null
+    }
+  ],
   members: [
     { name: 'Ayush Kumar Modanwal', id: 'CS-067', mobile: '9876501067', year: 'B.Tech 2nd Year CSE', initials: 'AK', status: 'approved', streak: 12, xp: 1450, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [78, 82, 80, 86, 89, 92], subjects: createBTechSubjects([0, 0, 0, 0, 0, 0, 0]) },
     { name: 'Priya Sharma', id: 'CS-052', mobile: '9876501052', year: 'B.Tech 2nd Year CSE', initials: 'PS', status: 'approved', streak: 15, xp: 1680, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [84, 86, 88, 90, 91, 94], subjects: createBTechSubjects([2, 3, 1, 2, 4, 2, 1]) },
@@ -46,8 +61,8 @@ const DEFAULT_DATA = {
   ],
   liveLogs: [],
   activities: [
-    { text: 'Ayush Kumar Modanwal (CS-067) active on Live Database', time: 'Today', tag: 'Verified' },
-    { text: 'Rahul Yadav (CS-091 | +91-9876501091) awaiting Admin Approval', time: 'Today', tag: 'Pending' }
+    { text: 'Ayush Kumar Modanwal (CS-067) active on Student Portal', time: 'Today', tag: 'Student' },
+    { text: 'Rahul Yadav (CS-091) awaiting HOD / Coordinator Approval', time: 'Today', tag: 'Pending' }
   ]
 };
 
@@ -58,6 +73,9 @@ function loadState() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return structuredClone(DEFAULT_DATA);
     const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed.coordinators) || !parsed.coordinators.length) {
+      parsed.coordinators = structuredClone(DEFAULT_DATA.coordinators);
+    }
     const today = new Date().toDateString();
     if (parsed.lastDate !== today) {
       parsed.lastDate = today;

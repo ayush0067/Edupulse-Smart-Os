@@ -9,12 +9,12 @@ let matchedConfidence = 0;
 const VIEW_META = {
   dashboard: ['Dashboard Overview', 'B.Tech 2nd & 3rd Year attendance, biometric ID & study insights'],
   attendance: ['Smart Attendance Tracker', 'Once marked for today, attendance is permanently locked (Cannot Reverse)'],
-  live: ['Live Face Registration & Attendance', 'Enroll student biometrics & verify attendance live for HOD audit'],
+  live: ['Live Face Registration & Attendance', 'Enroll student biometrics & verify attendance live'],
   academics: ['Academics & Study Insights', 'Detailed B.Tech subject marks & AI focus recommendations'],
   solver: ['In-App Problem Solver', 'B.Tech questions — Once answered, options lock permanently'],
   bot: ['Live Online AI Learning Bot', 'Ask ANY question online & earn study XP'],
   rewards: ['Rewards & Streaks', 'Redeem earned XP from attendance, Face ID & problem solving'],
-  coordinator: ['Coordinator Approval Portal', 'Approve student self-registrations & manage batch access']
+  coordinator: ['HOD & Coordinator Governance Portal', 'Dedicated Teachers & Admin Portal — Approve registrations, verify live photos & audit attendance']
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -31,6 +31,12 @@ function setupNavigation() {
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = btn.dataset.view;
+      const role = state.session?.role;
+
+      // Strict Role Guard: Students cannot open HOD views; HODs stay in Faculty views
+      if (role === 'student' && target === 'coordinator') return;
+      if (role === 'coordinator' && !['coordinator', 'live'].includes(target)) return;
+
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       btn.classList.add('active');
@@ -45,13 +51,7 @@ function setupNavigation() {
 }
 
 function setupControls() {
-  document.getElementById('member-switcher')?.addEventListener('change', e => {
-    state.activeMemberIndex = Number(e.target.value);
-    window.saveState(state);
-    renderAll();
-  });
-
-  document.getElementById('reset-demo-btn').addEventListener('click', async () => {
+  document.getElementById('reset-demo-btn')?.addEventListener('click', async () => {
     const sess = state.session;
     state = resetState();
     await ensureDefaultHashes();
@@ -61,31 +61,32 @@ function setupControls() {
     showToast('Demo session reset.');
   });
 
-  document.getElementById('solver-subject-filter').addEventListener('change', renderSolverList);
-  document.getElementById('set-apikey-btn').addEventListener('click', () => {
+  document.getElementById('solver-subject-filter')?.addEventListener('change', renderSolverList);
+  document.getElementById('set-apikey-btn')?.addEventListener('click', () => {
     const k = prompt('Paste Google Gemini API Key:', localStorage.getItem('edupulse_gemini_key') || '');
     if (k !== null) localStorage.setItem('edupulse_gemini_key', k.trim());
   });
-  document.getElementById('ai-generate-btn').addEventListener('click', handleAIGenerate);
-  document.getElementById('start-cam-btn').addEventListener('click', toggleCamera);
-  document.getElementById('register-face-btn').addEventListener('click', registerMemberFace);
-  document.getElementById('verify-live-btn').addEventListener('click', verifyLiveFaceAttendance);
-  document.getElementById('export-hod-btn').addEventListener('click', exportHODReportCSV);
+  document.getElementById('ai-generate-btn')?.addEventListener('click', handleAIGenerate);
+  document.getElementById('start-cam-btn')?.addEventListener('click', toggleCamera);
+  document.getElementById('register-face-btn')?.addEventListener('click', registerMemberFace);
+  document.getElementById('verify-live-btn')?.addEventListener('click', verifyLiveFaceAttendance);
+  document.getElementById('export-hod-btn')?.addEventListener('click', exportHODReportCSV);
 
-  document.getElementById('toggle-add-member-btn').addEventListener('click', () => {
+  document.getElementById('toggle-add-member-btn')?.addEventListener('click', () => {
     const f = document.getElementById('add-member-form');
     f.style.display = f.style.display === 'none' ? 'flex' : 'none';
   });
 
-  document.getElementById('add-member-form').addEventListener('submit', async e => {
+  document.getElementById('add-member-form')?.addEventListener('submit', async e => {
     e.preventDefault();
     const name = document.getElementById('new-member-name').value.trim();
     const id = document.getElementById('new-member-id').value.trim().toUpperCase();
+    const mobile = document.getElementById('new-member-mobile').value.trim().replace(/\D/g, '');
     const year = document.getElementById('new-member-year').value;
     if (!name || !id) return;
     const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
     state.members.push({
-      name, id, year, initials, passwordHash: await hashPassword('pass123'), status: 'approved',
+      name, id, mobile, year, initials, passwordHash: await hashPassword('pass123'), status: 'approved',
       streak: 1, xp: 500, faceRegistered: false, facePhoto: null, faceDescriptor: null,
       performanceHistory: [75, 78, 80, 82, 84, 86], subjects: createBTechSubjects()
     });
@@ -99,7 +100,6 @@ function setupControls() {
 }
 
 function renderAll() {
-  renderMemberSwitchers();
   renderHeaderAndKPIs();
   renderRecentActivity();
   renderAttendanceCards();
@@ -117,12 +117,26 @@ function renderAllChartsForMember() {
   renderAllCharts({ subjects: m.subjects, performanceHistory: { labels: ['Sem 1', 'Sem 2', 'Sem 3', 'Mid-3', 'Sem 4', 'Current'], scores: m.performanceHistory } });
 }
 
-function renderMemberSwitchers() {
-  const s = document.getElementById('member-switcher');
-  if (s) s.innerHTML = state.members.map((m, i) => `<option value="${i}" ${i === state.activeMemberIndex ? 'selected' : ''}>👤 ${m.name} (${m.id})</option>`).join('');
-}
-
 function renderHeaderAndKPIs() {
+  const ft = document.getElementById('top-face-thumb');
+  const ini = document.getElementById('top-avatar-initials');
+
+  // If logged in as HOD / Coordinator, display their Faculty Profile & Live Verification Photo in Topbar
+  if (state.session?.role === 'coordinator') {
+    const fac = (state.coordinators || []).find(c => c.id === state.session.memberId) || state.coordinators[0];
+    if (fac) {
+      document.getElementById('student-name').textContent = fac.name;
+      document.getElementById('student-id').textContent = `${fac.designation} • ${fac.id}`;
+      if (fac.facePhoto) {
+        ft.src = fac.facePhoto; ft.style.display = 'block'; ini.style.display = 'none';
+      } else {
+        ft.style.display = 'none'; ini.style.display = 'grid'; ini.textContent = fac.initials || 'HD';
+      }
+    }
+    return;
+  }
+
+  // Otherwise render Active Student Profile & KPIs
   const m = getActiveMember(state);
   if (!m) return;
   document.getElementById('student-name').textContent = m.name;
@@ -131,8 +145,6 @@ function renderHeaderAndKPIs() {
   document.getElementById('sidebar-xp').textContent = `${m.xp.toLocaleString()} XP`;
   document.getElementById('sidebar-streak').textContent = `${m.streak} Day Streak`;
 
-  const ft = document.getElementById('top-face-thumb');
-  const ini = document.getElementById('top-avatar-initials');
   if (m.faceRegistered && m.facePhoto) { ft.src = m.facePhoto; ft.style.display = 'block'; ini.style.display = 'none'; }
   else { ft.style.display = 'none'; ini.style.display = 'grid'; ini.textContent = m.initials; }
 
@@ -153,12 +165,14 @@ function renderHeaderAndKPIs() {
 
 function renderRecentActivity() {
   const list = document.getElementById('recent-activity-list');
-  list.innerHTML = state.activities.slice(0, 5).map(a => `<li><div><strong>${a.text}</strong><div style="color:var(--text-muted);font-size:0.78rem;">${a.time}</div></div><span class="badge badge-cyan">${a.tag}</span></li>`).join('');
+  if (list) list.innerHTML = state.activities.slice(0, 5).map(a => `<li><div><strong>${a.text}</strong><div style="color:var(--text-muted);font-size:0.78rem;">${a.time}</div></div><span class="badge badge-cyan">${a.tag}</span></li>`).join('');
 }
 
 function renderAttendanceCards() {
   const m = getActiveMember(state);
-  document.getElementById('attendance-cards-grid').innerHTML = m.subjects.map((s, idx) => {
+  const grid = document.getElementById('attendance-cards-grid');
+  if (!grid) return;
+  grid.innerHTML = m.subjects.map((s, idx) => {
     const pct = s.total ? Math.round((s.attended / s.total) * 100) : 0;
     const isSafe = pct >= 75;
     const locked = Boolean(s.todayStatus);
@@ -230,15 +244,15 @@ function extractFaceDescriptor(videoEl) {
   const ctx = canvas.getContext('2d');
   const vw = videoEl.videoWidth || 640, vh = videoEl.videoHeight || 480;
   const size = Math.min(vw, vh) * 0.55;
-  ctx.drawImage(videoEl, (vw - size) / 2, (vh - size) / 2, size, size, 0, 0, 160, 160);
-  const imgData = ctx.getImageData(0, 0, 160, 160).data;
+  ctx.drawImage(videoEl, (vw - size) / 2, (vh - size) / 2, size, size, 0, 0, 140, 140);
+  const imgData = ctx.getImageData(0, 0, 140, 140).data;
   const desc = [];
-  for (let by = 0; by < 8; by++) {
-    for (let bx = 0; bx < 8; bx++) {
+  for (let by = 0; by < 14; by++) {
+    for (let bx = 0; bx < 14; bx++) {
       let r = 0, g = 0, b = 0, c = 0;
-      for (let y = by * 20; y < (by + 1) * 20; y += 2) {
-        for (let x = bx * 20; x < (bx + 1) * 20; x += 2) {
-          const idx = (y * 160 + x) * 4;
+      for (let y = by * 10; y < (by + 1) * 10; y += 2) {
+        for (let x = bx * 10; x < (bx + 1) * 10; x += 2) {
+          const idx = (y * 140 + x) * 4;
           r += imgData[idx]; g += imgData[idx + 1]; b += imgData[idx + 2]; c++;
         }
       }
@@ -246,7 +260,7 @@ function extractFaceDescriptor(videoEl) {
     }
   }
   const norm = Math.sqrt(desc.reduce((s, v) => s + v * v, 0)) || 1;
-  return { vector: desc.map(v => v / norm), thumbnail: canvas.toDataURL('image/jpeg', 0.75) };
+  return { vector: desc.map(v => v / norm), thumbnail: canvas.toDataURL('image/jpeg', 0.85) };
 }
 
 function cosineSimilarity(a, b) {
@@ -293,7 +307,12 @@ function startContinuousFaceScan() {
     if (!enrolled.length) { banner.textContent = '⚠️ Select a member and click "🪪 Register Face ID"!'; return; }
     const sample = extractFaceDescriptor(video);
     let bestIdx = -1, bestSim = -1;
-    enrolled.forEach(({ m, idx }) => { const sim = cosineSimilarity(sample.vector, m.faceDescriptor); if (sim > bestSim) { bestSim = sim; bestIdx = idx; } });
+    enrolled.forEach(({ m, idx }) => {
+      if (m.faceDescriptor.length === sample.vector.length) {
+        const sim = cosineSimilarity(sample.vector, m.faceDescriptor);
+        if (sim > bestSim) { bestSim = sim; bestIdx = idx; }
+      }
+    });
     const pct = Math.min(99.4, Math.max(0, bestSim * 100)).toFixed(1);
     if (bestSim >= 0.90 && bestIdx !== -1) {
       matchedMemberIndex = bestIdx; matchedConfidence = pct;
@@ -346,20 +365,23 @@ function exportHODReportCSV() {
 function renderAcademics() {
   const m = getActiveMember(state);
   let lowSub = '', lowVal = 101;
-  document.getElementById('academics-table-body').innerHTML = m.subjects.map(s => {
+  const tbody = document.getElementById('academics-table-body');
+  if (tbody) tbody.innerHTML = m.subjects.map(s => {
     const tot = s.internal + s.midterm + s.assignments;
     if (tot < lowVal) { lowVal = tot; lowSub = `${s.code} (${s.name})`; }
     return `<tr><td><strong>${s.code}</strong></td><td>${s.name}</td><td>${s.internal}</td><td>${s.midterm}</td><td>${s.assignments}</td><td><strong>${tot}%</strong></td><td><span class="badge badge-purple">${getGradeLetter(tot)}</span></td><td><span class="badge ${tot >= 75 ? 'badge-green' : 'badge-red'}">${tot >= 75 ? 'Strong' : 'Needs Focus'}</span></td></tr>`;
   }).join('');
-  document.getElementById('study-insights-box').innerHTML = `<div class="card-header"><h3>✨ AI Study Insights — ${m.name}</h3><span class="badge badge-cyan">Auto-Analyzed</span></div><p style="color:var(--text-muted);">Lowest scoring subject: <strong style="color:var(--amber);">${lowSub} (${lowVal}%)</strong>. Practice MCQs or use the AI Learning Bot to boost readiness.</p>`;
+  const ib = document.getElementById('study-insights-box');
+  if (ib) ib.innerHTML = `<div class="card-header"><h3>✨ AI Study Insights — ${m.name}</h3><span class="badge badge-cyan">Auto-Analyzed</span></div><p style="color:var(--text-muted);">Lowest scoring subject: <strong style="color:var(--amber);">${lowSub} (${lowVal}%)</strong>. Practice MCQs or use the AI Learning Bot to boost readiness.</p>`;
 }
 
 function renderSolverList() {
-  const filter = document.getElementById('solver-subject-filter').value;
+  const filter = document.getElementById('solver-subject-filter')?.value || 'ALL';
   const filtered = state.questions.filter(q => filter === 'ALL' || q.subject === filter);
   const locked = filtered.filter(q => q.attempted || q.solved).length;
-  document.getElementById('solver-progress-badge').textContent = `${locked} / ${filtered.length} Locked`;
-  document.getElementById('question-list').innerHTML = filtered.map(q => {
+  if (document.getElementById('solver-progress-badge')) document.getElementById('solver-progress-badge').textContent = `${locked} / ${filtered.length} Locked`;
+  const ql = document.getElementById('question-list');
+  if (ql) ql.innerHTML = filtered.map(q => {
     const isL = q.attempted || q.solved;
     const b = isL ? (q.solved ? `<span class="badge badge-green">🔒 Correct ✓</span>` : `<span class="badge badge-red">🔒 Missed ✗</span>`) : `<span class="badge badge-purple">+${q.xp} XP</span>`;
     return `<div class="q-item ${q.id === selectedQuestionId ? 'selected' : ''}" onclick="openQuestion('${q.id}')"><div style="display:flex;justify-content:space-between;"><strong>${q.title}</strong>${b}</div><small style="color:var(--text-muted);">${q.subject} • ${q.difficulty}</small></div>`;
@@ -396,9 +418,10 @@ async function handleAIGenerate() {
 
 function renderRewards() {
   const m = getActiveMember(state);
-  document.getElementById('rewards-xp-balance').textContent = `${m.xp.toLocaleString()} XP`;
-  document.getElementById('rewards-streak').textContent = `${m.streak} Days`;
-  document.getElementById('rewards-grid').innerHTML = state.rewards.map(r => `<div class="reward-card ${r.claimed ? 'unlocked' : ''}"><div><div style="font-size:1.8rem;">${r.icon}</div><strong>${r.title}</strong><p style="color:var(--text-muted);font-size:0.85rem;">${r.desc}</p></div><div style="display:flex;justify-content:space-between;align-items:center;"><span class="badge badge-cyan">${r.cost} XP</span>${r.claimed ? `<span class="badge badge-green">Claimed ✓</span>` : `<button class="btn-primary" onclick="claimReward('${r.id}')">Claim</button>`}</div></div>`).join('');
+  if (document.getElementById('rewards-xp-balance')) document.getElementById('rewards-xp-balance').textContent = `${m.xp.toLocaleString()} XP`;
+  if (document.getElementById('rewards-streak')) document.getElementById('rewards-streak').textContent = `${m.streak} Days`;
+  const rg = document.getElementById('rewards-grid');
+  if (rg) rg.innerHTML = state.rewards.map(r => `<div class="reward-card ${r.claimed ? 'unlocked' : ''}"><div><div style="font-size:1.8rem;">${r.icon}</div><strong>${r.title}</strong><p style="color:var(--text-muted);font-size:0.85rem;">${r.desc}</p></div><div style="display:flex;justify-content:space-between;align-items:center;"><span class="badge badge-cyan">${r.cost} XP</span>${r.claimed ? `<span class="badge badge-green">Claimed ✓</span>` : `<button class="btn-primary" onclick="claimReward('${r.id}')">Claim</button>`}</div></div>`).join('');
 }
 
 function claimReward(id) {

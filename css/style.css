@@ -252,3 +252,42 @@ body {
   .sidebar { height: auto; position: static; }
   .charts-grid, .bottom-grid, .solver-layout, .live-grid { grid-template-columns: 1fr; }
 }
+
+/* Strict Role Isolation: Teachers/HOD Portal vs Student Portal */
+body.role-student .hod-only { display: none !important; }
+body.role-hod .student-only { display: none !important; }
+
+.portal-role-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 6px;
+  background: rgba(5, 8, 17, 0.9);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  border-radius: 14px;
+  margin: 14px 0 16px;
+}
+
+.portal-switch-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 10px 8px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.portal-switch-btn.active.student-mode {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(99, 102, 241, 0.22));
+  border-color: rgba(34, 211, 238, 0.45);
+  color: var(--cyan);
+}
+
+.portal-switch-btn.active.faculty-mode {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(168, 85, 247, 0.22));
+  border-color: rgba(245, 158, 11, 0.45);
+  color: var(--amber);
+}
