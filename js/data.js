@@ -1,4 +1,4 @@
-﻿const STORAGE_KEY = 'edupulse_student_data_v7';
+﻿const STORAGE_KEY = 'edupulse_student_data_v8';
 
 function createBTechSubjects(offsets = [0, 0, 0, 0, 0, 0, 0]) {
   const base = [
@@ -36,6 +36,7 @@ const DEFAULT_DATA = {
       designation: 'Head of Department (HOD)',
       department: 'CSE & AIML',
       mobile: '9876500001',
+      mobileVerified: true,
       initials: 'SS',
       status: 'approved',
       registeredAt: 'Master Admin',
@@ -45,12 +46,12 @@ const DEFAULT_DATA = {
     }
   ],
   members: [
-    { name: 'Ayush Kumar Modanwal', id: 'CS-067', mobile: '9876501067', year: 'B.Tech 2nd Year CSE', initials: 'AK', status: 'approved', streak: 12, xp: 1450, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [78, 82, 80, 86, 89, 92], subjects: createBTechSubjects([0, 0, 0, 0, 0, 0, 0]) },
-    { name: 'Priya Sharma', id: 'CS-052', mobile: '9876501052', year: 'B.Tech 2nd Year CSE', initials: 'PS', status: 'approved', streak: 15, xp: 1680, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [84, 86, 88, 90, 91, 94], subjects: createBTechSubjects([2, 3, 1, 2, 4, 2, 1]) },
-    { name: 'Rohan Verma', id: 'CS-041', mobile: '9876501041', year: 'B.Tech 2nd Year CSE', initials: 'RV', status: 'approved', streak: 6, xp: 980, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [70, 72, 69, 74, 76, 79], subjects: createBTechSubjects([-3, -2, -2, -1, 0, -2, -1]) },
-    { name: 'Ananya Singh', id: 'CS-019', mobile: '9876501019', year: 'B.Tech 3rd Year CSE', initials: 'AS', status: 'approved', streak: 18, xp: 1920, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [86, 88, 87, 91, 93, 95], subjects: createBTechSubjects([3, 4, 2, 3, 5, 3, 2]) },
-    { name: 'Vikramaditya Patel', id: 'CS-084', mobile: '9876501084', year: 'B.Tech 3rd Year CSE', initials: 'VP', status: 'approved', streak: 9, xp: 1210, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [74, 77, 75, 80, 82, 84], subjects: createBTechSubjects([-1, 1, 0, -1, 2, 0, 1]) },
-    { name: 'Rahul Yadav', id: 'CS-091', mobile: '9876501091', year: 'B.Tech 2nd Year CSE', initials: 'RY', status: 'pending', registeredAt: 'Just now', streak: 1, xp: 500, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [75, 77, 79, 80, 82, 84], subjects: createBTechSubjects([0, 0, 0, 0, 0, 0, 0]) }
+    { name: 'Ayush Kumar Modanwal', id: 'CS-067', mobile: '9876501067', mobileVerified: true, year: 'B.Tech 2nd Year CSE', initials: 'AK', status: 'approved', streak: 12, xp: 1450, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [78, 82, 80, 86, 89, 92], subjects: createBTechSubjects([0, 0, 0, 0, 0, 0, 0]) },
+    { name: 'Priya Sharma', id: 'CS-052', mobile: '9876501052', mobileVerified: true, year: 'B.Tech 2nd Year CSE', initials: 'PS', status: 'approved', streak: 15, xp: 1680, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [84, 86, 88, 90, 91, 94], subjects: createBTechSubjects([2, 3, 1, 2, 4, 2, 1]) },
+    { name: 'Rohan Verma', id: 'CS-041', mobile: '9876501041', mobileVerified: true, year: 'B.Tech 2nd Year CSE', initials: 'RV', status: 'approved', streak: 6, xp: 980, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [70, 72, 69, 74, 76, 79], subjects: createBTechSubjects([-3, -2, -2, -1, 0, -2, -1]) },
+    { name: 'Ananya Singh', id: 'CS-019', mobile: '9876501019', mobileVerified: true, year: 'B.Tech 3rd Year CSE', initials: 'AS', status: 'approved', streak: 18, xp: 1920, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [86, 88, 87, 91, 93, 95], subjects: createBTechSubjects([3, 4, 2, 3, 5, 3, 2]) },
+    { name: 'Vikramaditya Patel', id: 'CS-084', mobile: '9876501084', mobileVerified: true, year: 'B.Tech 3rd Year CSE', initials: 'VP', status: 'approved', streak: 9, xp: 1210, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [74, 77, 75, 80, 82, 84], subjects: createBTechSubjects([-1, 1, 0, -1, 2, 0, 1]) },
+    { name: 'Rahul Yadav', id: 'CS-091', mobile: '9876501091', mobileVerified: true, year: 'B.Tech 2nd Year CSE', initials: 'RY', status: 'pending', registeredAt: 'Just now', streak: 1, xp: 500, faceRegistered: false, facePhoto: null, faceDescriptor: null, performanceHistory: [75, 77, 79, 80, 82, 84], subjects: createBTechSubjects([0, 0, 0, 0, 0, 0, 0]) }
   ],
   questions: getInitialBTechQuestions(),
   rewards: [
@@ -61,8 +62,8 @@ const DEFAULT_DATA = {
   ],
   liveLogs: [],
   activities: [
-    { text: 'Ayush Kumar Modanwal (CS-067) active on Student Portal', time: 'Today', tag: 'Student' },
-    { text: 'Rahul Yadav (CS-091) awaiting HOD / Coordinator Approval', time: 'Today', tag: 'Pending' }
+    { text: 'Ayush Kumar Modanwal (CS-067) verified on Student OS', time: 'Today', tag: 'Student' },
+    { text: 'Rahul Yadav (CS-091) awaiting HOD / Admin Approval', time: 'Today', tag: 'Pending' }
   ]
 };
 

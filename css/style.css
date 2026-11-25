@@ -291,3 +291,140 @@ body.role-hod .student-only { display: none !important; }
   border-color: rgba(245, 158, 11, 0.45);
   color: var(--amber);
 }
+
+/* Strict Role Isolation: Admin/HOD Portal vs Student Portal */
+body.role-student .hod-only { display: none !important; }
+body.role-hod .student-only { display: none !important; }
+
+.portal-security-strip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 12px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--green);
+  margin: 10px 0 14px;
+}
+
+.portal-role-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 6px;
+  background: rgba(5, 8, 17, 0.92);
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  border-radius: 14px;
+  margin-bottom: 16px;
+}
+
+.portal-switch-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 11px 8px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.portal-switch-btn.active.student-mode {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(99, 102, 241, 0.22));
+  border-color: rgba(34, 211, 238, 0.45);
+  color: var(--cyan);
+  box-shadow: 0 4px 16px rgba(34, 211, 238, 0.14);
+}
+
+.portal-switch-btn.active.faculty-mode {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.24), rgba(168, 85, 247, 0.22));
+  border-color: rgba(245, 158, 11, 0.48);
+  color: var(--amber);
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.14);
+}
+
+/* 6-Digit Segmented Bank-Grade OTP Input Boxes */
+.otp-grid-6 {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.otp-box {
+  width: 100%;
+  height: 46px;
+  text-align: center;
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(5, 8, 17, 0.9);
+  border: 1.5px solid rgba(34, 211, 238, 0.35);
+  color: var(--cyan);
+  border-radius: 10px;
+  transition: all 0.18s ease;
+}
+
+.otp-box:focus {
+  outline: none;
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18);
+  transform: translateY(-1px);
+}
+
+.otp-box.verified-box {
+  border-color: var(--green);
+  color: var(--green);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+/* Floating Live Smartphone SMS Notification Receiver */
+.live-sms-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  background: rgba(11, 18, 34, 0.96);
+  border: 1px solid rgba(34, 211, 238, 0.55);
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.72), 0 0 24px rgba(34, 211, 238, 0.2);
+  backdrop-filter: blur(20px);
+  z-index: 9999;
+  display: none;
+  animation: slideInSms 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideInSms {
+  from { opacity: 0; transform: translateY(-16px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.sms-toast-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.74rem;
+  color: var(--cyan);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.sms-toast-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: 5px;
+  color: #ffffff;
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px dashed rgba(34, 211, 238, 0.4);
+  padding: 6px 12px;
+  border-radius: 10px;
+  text-align: center;
+  margin: 8px 0;
+}

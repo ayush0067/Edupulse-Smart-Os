@@ -2,11 +2,14 @@
 let signupFaceData = null;
 let facultyFaceData = null;
 let faceLoginTimer = null;
-let activeRecoveryOTP = null;
-let activeRecoveryRollId = null;
-let otpVerifiedStage = false;
-let otpCountdownInterval = null;
 let editingRollId = null;
+
+// Live OTP State Store for Multiple Flows (Student Register, Admin/HOD Register, Forgot Password)
+const otpSessions = {
+  reg: { code: null, mobile: null, verified: false, timer: null },
+  fac: { code: null, mobile: null, verified: false, timer: null },
+  forgot: { code: null, mobile: null, targetId: null, accountType: 'student', verified: false, timer: null }
+};
 
 async function hashPassword(plainText) {
   if (window.crypto && window.crypto.subtle) {
@@ -23,13 +26,14 @@ async function ensureDefaultHashes() {
   if (!Array.isArray(state.coordinators) || !state.coordinators.length) {
     state.coordinators = [{
       name: 'Dr. S. K. Singh', id: 'HOD-ADMIN', designation: 'Head of Department (HOD)',
-      department: 'CSE & AIML', mobile: '9876500001', initials: 'SS', status: 'approved',
+      department: 'CSE & AIML', mobile: '9876500001', mobileVerified: true, initials: 'SS', status: 'approved',
       passwordHash: masterHodHash, faceRegistered: false, facePhoto: null, faceDescriptor: null
     }];
     changed = true;
   }
   state.coordinators.forEach(c => {
     if (!c.passwordHash) { c.passwordHash = masterHodHash; changed = true; }
+    if (!c.mobile) { c.mobile = '9876500001'; changed = true; }
   });
 
   const defHash = await hashPassword('pass123');
@@ -47,14 +51,168 @@ function togglePasswordField(inputId, btnEl) {
   btnEl.textContent = input.type === 'password' ? '👁️' : '🙈';
 }
 
-// Switch top-level portal gate between Student Gate and HOD/Coordinator (Teachers) Gate
+// ================= BANK-GRADE 6-BOX SEGMENTED OTP BUILDER =================
+function buildOtpBoxes(containerId, flowKey, onAllFilled) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = Array.from({ length: 6 })
+    .map((_, idx) => `<input type="text" inputmode="numeric" maxlength="1" class="otp-box" data-flow="${flowKey}" data-idx="${idx}" />`)
+    .join('');
+
+  const boxes = Array.from(container.querySelectorAll('.otp-box'));
+  boxes.forEach((box, idx) => {
+    box.addEventListener('input', e => {
+      const val = e.target.value.replace(/\D/g, '');
+      e.target.value = val.slice(-1);
+      if (e.target.value && idx < 5) boxes[idx + 1].focus();
+      const fullCode = boxes.map(b => b.value).join('');
+      if (fullCode.length === 6 && typeof onAllFilled === 'function') onAllFilled(fullCode, boxes);
+    });
+
+    box.addEventListener('keydown', e => {
+      if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+        boxes[idx - 1].focus();
+      }
+    });
+
+    box.addEventListener('paste', e => {
+      e.preventDefault();
+      const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
+      if (!pasted) return;
+      pasted.split('').forEach((ch, i) => { if (boxes[i]) boxes[i].value = ch; });
+      const lastIdx = Math.min(5, pasted.length - 1);
+      boxes[lastIdx]?.focus();
+      if (pasted.length === 6 && typeof onAllFilled === 'function') onAllFilled(pasted, boxes);
+    });
+  });
+  boxes[0]?.focus();
+}
+
+function getOtpBoxesValue(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return '';
+  return Array.from(container.querySelectorAll('.otp-box')).map(b => b.value).join('');
+}
+
+function fillOtpBoxesProgrammatically(containerId, code) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const boxes = Array.from(container.querySelectorAll('.otp-box'));
+  code.split('').forEach((ch, i) => {
+    if (boxes[i]) {
+      boxes[i].value = ch;
+      boxes[i].dispatchEvent(new Event('input'));
+    }
+  });
+}
+
+function closeLiveSmsToast() {
+  const el = document.getElementById('live-sms-toast');
+  if (el) el.style.display = 'none';
+}
+
+// ================= REAL-TIME LIVE SMS / PUSH OTP GATEWAY DISPATCHER =================
+async function dispatchLiveSmsOtp({ flowKey, targetId, mobile, purposeLabel, boxesContainerId, timerElId, onAutoVerify }) {
+  const cleanMobile = mobile.replace(/\D/g, '');
+  if (cleanMobile.length !== 10) {
+    setAuthAlert('error', 'Please enter a valid 10-digit Indian mobile number (+91).');
+    return null;
+  }
+
+  let otpCode = String(Math.floor(100000 + Math.random() * 900000));
+  if (window.crypto && window.crypto.getRandomValues) {
+    const arr = new Uint32Array(1);
+    window.crypto.getRandomValues(arr);
+    otpCode = String(100000 + (arr[0] % 900000));
+  }
+
+  // 1. Log to Python SQLite3 backend if online
+  try {
+    const res = await fetch('/api/send-sms-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roll_id: targetId || 'NEW-USER', mobile_no: cleanMobile })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      otpCode = data.otp;
+    }
+  } catch {}
+
+  // 2. Dispatch Live Push Notification to Phone via ntfy.sh
+  const pushTopic = `edupulse-otp-${cleanMobile}`;
+  try {
+    fetch(`https://ntfy.sh/${pushTopic}`, {
+      method: 'POST',
+      headers: { 'Title': 'EduPulse Live Verification OTP', 'Priority': 'high', 'Tags': 'lock,shield' },
+      body: `Your EduPulse 6-digit verification OTP for ${targetId || cleanMobile} is: ${otpCode} (Valid 60s)`
+    }).catch(() => {});
+  } catch {}
+
+  const sess = otpSessions[flowKey];
+  sess.code = otpCode;
+  sess.mobile = cleanMobile;
+  sess.verified = false;
+  if (sess.timer) clearInterval(sess.timer);
+
+  // Build 6 segmented boxes
+  buildOtpBoxes(boxesContainerId, flowKey, (enteredCode, boxes) => {
+    if (enteredCode === sess.code) {
+      sess.verified = true;
+      if (sess.timer) clearInterval(sess.timer);
+      boxes.forEach(b => b.classList.add('verified-box'));
+      closeLiveSmsToast();
+      if (typeof onAutoVerify === 'function') onAutoVerify();
+    } else {
+      setAuthAlert('error', 'Incorrect 6-digit OTP. Check the Live SMS Gateway notification.');
+    }
+  });
+
+  // Start 60s Countdown
+  let secondsLeft = 60;
+  const timerEl = document.getElementById(timerElId);
+  if (timerEl) timerEl.textContent = '60s';
+  sess.timer = setInterval(() => {
+    secondsLeft -= 1;
+    if (secondsLeft <= 0) {
+      clearInterval(sess.timer);
+      sess.code = null;
+      if (timerEl) timerEl.textContent = 'Expired';
+    } else if (timerEl) {
+      timerEl.textContent = `${secondsLeft}s`;
+    }
+  }, 1000);
+
+  // Show Floating Smartphone SMS Gateway Notification
+  const smsToast = document.getElementById('live-sms-toast');
+  document.getElementById('sms-toast-to').textContent = `+91-XXXXXX${cleanMobile.slice(-4)}`;
+  document.getElementById('sms-toast-purpose').textContent = purposeLabel;
+  document.getElementById('sms-toast-code').textContent = otpCode;
+  document.getElementById('sms-toast-phone-link').href = `https://ntfy.sh/${pushTopic}`;
+  smsToast.style.display = 'block';
+
+  const fillBtn = document.getElementById('sms-toast-fill-btn');
+  const freshFillBtn = fillBtn.cloneNode(true);
+  fillBtn.parentNode.replaceChild(freshFillBtn, fillBtn);
+  freshFillBtn.addEventListener('click', () => {
+    fillOtpBoxesProgrammatically(boxesContainerId, otpCode);
+  });
+
+  return otpCode;
+}
+
+// Switch top-level portal gate between Student Gate and Admin/HOD/Coordinator Gate
 function switchPortalGate(gate) {
   stopAuthCamera();
+  closeLiveSmsToast();
   setAuthAlert('', '');
   const sGate = document.getElementById('student-gate-container');
   const fGate = document.getElementById('faculty-gate-container');
+  const forgotPanel = document.getElementById('panel-forgot-password');
   const sBtn = document.getElementById('gate-student-btn');
   const fBtn = document.getElementById('gate-faculty-btn');
+
+  if (forgotPanel) forgotPanel.classList.remove('active');
 
   if (gate === 'faculty') {
     sGate.style.display = 'none';
@@ -80,7 +238,6 @@ function activateAuthSubTab(tabName, scopeEl = document) {
   if (panel) panel.classList.add('active');
 }
 
-// Extract 392-D Biometric Vector from an Uploaded Image Element (for HOD/Coordinator Live Photo Upload)
 function extractDescriptorFromImageElement(imgEl) {
   const canvas = document.getElementById('face-process-canvas');
   const ctx = canvas.getContext('2d');
@@ -124,128 +281,200 @@ function updatePipelineStageUI(activeStage) {
   });
 }
 
-function resetForgotPipeline() {
-  activeRecoveryOTP = null;
-  activeRecoveryRollId = null;
-  otpVerifiedStage = false;
-  if (otpCountdownInterval) clearInterval(otpCountdownInterval);
+function openUnifiedForgotPanel(accountType) {
+  stopAuthCamera();
+  closeLiveSmsToast();
+  document.getElementById('student-gate-container').style.display = 'none';
+  document.getElementById('faculty-gate-container').style.display = 'none';
+  document.getElementById('panel-forgot-password').classList.add('active');
+
+  otpSessions.forgot.verified = false;
+  otpSessions.forgot.code = null;
+  otpSessions.forgot.accountType = accountType;
+  document.getElementById('forgot-account-type').value = accountType;
   updatePipelineStageUI(1);
-  if (document.getElementById('otp-display-banner')) document.getElementById('otp-display-banner').style.display = 'none';
-  if (document.getElementById('forgot-stage-2')) document.getElementById('forgot-stage-2').style.display = 'none';
-  if (document.getElementById('forgot-stage-3')) document.getElementById('forgot-stage-3').style.display = 'none';
+  document.getElementById('forgot-stage-2').style.display = 'none';
+  document.getElementById('forgot-stage-3').style.display = 'none';
+  setAuthAlert('', '');
+
+  if (accountType === 'faculty') {
+    const pre = document.getElementById('coord-id').value.trim().toUpperCase();
+    if (pre) {
+      document.getElementById('forgot-roll-id').value = pre;
+      const f = state.coordinators.find(c => c.id.toUpperCase() === pre);
+      if (f?.mobile) document.getElementById('forgot-mobile-input').value = f.mobile;
+    }
+  } else {
+    const pre = document.getElementById('login-roll-id').value.trim().toUpperCase();
+    if (pre) {
+      document.getElementById('forgot-roll-id').value = pre;
+      const m = state.members.find(x => x.id.toUpperCase() === pre);
+      if (m?.mobile) document.getElementById('forgot-mobile-input').value = m.mobile;
+    }
+  }
 }
 
 function autoFillForgotDemo() {
-  const roll = document.getElementById('forgot-roll-id').value.trim().toUpperCase() || 'CS-067';
-  const m = state.members.find(x => x.id.toUpperCase() === roll) || state.members[0];
-  document.getElementById('forgot-roll-id').value = m.id;
-  document.getElementById('forgot-mobile-input').value = m.mobile || '9876501067';
+  const type = document.getElementById('forgot-account-type').value;
+  if (type === 'faculty') {
+    const f = state.coordinators[0];
+    document.getElementById('forgot-roll-id').value = f.id;
+    document.getElementById('forgot-mobile-input').value = f.mobile || '9876500001';
+  } else {
+    const m = state.members[0];
+    document.getElementById('forgot-roll-id').value = m.id;
+    document.getElementById('forgot-mobile-input').value = m.mobile || '9876501067';
+  }
 }
 
-async function dispatchMobileOTP() {
-  const rollId = document.getElementById('forgot-roll-id').value.trim().toUpperCase();
+async function triggerForgotPasswordOtp() {
+  const type = document.getElementById('forgot-account-type').value;
+  const targetId = document.getElementById('forgot-roll-id').value.trim().toUpperCase();
   const mobile = document.getElementById('forgot-mobile-input').value.trim().replace(/\D/g, '');
-  if (!rollId || mobile.length !== 10) { setAuthAlert('error', 'Enter a valid Roll ID and 10-digit registered Mobile Number.'); return; }
-  const member = state.members.find(m => m.id.toUpperCase() === rollId);
-  if (!member) { setAuthAlert('error', `Roll ID "${rollId}" not found.`); return; }
-  if (member.mobile && member.mobile !== mobile) { setAuthAlert('error', `Mobile +91-${mobile} does not match ${rollId}.`); return; }
 
-  let otpCode = String(Math.floor(100000 + Math.random() * 900000));
-  try {
-    const res = await fetch('/api/send-sms-otp', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roll_id: rollId, mobile_no: mobile })
-    });
-    if (res.ok) otpCode = (await res.json()).otp;
-  } catch {}
+  const list = type === 'faculty' ? state.coordinators : state.members;
+  const account = list.find(x => x.id.toUpperCase() === targetId);
+  if (!account) {
+    setAuthAlert('error', `${type === 'faculty' ? 'Admin/HOD ID' : 'Student Roll ID'} "${targetId}" not found.`);
+    return;
+  }
+  if (account.mobile && account.mobile !== mobile) {
+    setAuthAlert('error', `Mobile +91-${mobile} does not match registered number for ${targetId}.`);
+    return;
+  }
 
-  activeRecoveryOTP = otpCode;
-  activeRecoveryRollId = rollId;
-  otpVerifiedStage = false;
-  updatePipelineStageUI(2);
-  setAuthAlert('', '');
+  otpSessions.forgot.targetId = targetId;
+  otpSessions.forgot.accountType = type;
 
-  const banner = document.getElementById('otp-display-banner');
-  banner.style.display = 'block';
-  banner.innerHTML = `📲 <strong>SMS Gateway Dispatched</strong> to <strong>+91-XXXXXX${mobile.slice(-4)}</strong> (${member.name})<br/>Verification OTP: <strong style="font-size:1.15rem; letter-spacing:3px; color:#fff;">${otpCode}</strong>`;
-  document.getElementById('forgot-stage-2').style.display = 'block';
-  document.getElementById('forgot-stage-3').style.display = 'none';
-  document.getElementById('forgot-otp-input').value = '';
+  const sent = await dispatchLiveSmsOtp({
+    flowKey: 'forgot',
+    targetId,
+    mobile,
+    purposeLabel: `Password Reset OTP for ${account.name} (${targetId})`,
+    boxesContainerId: 'forgot-otp-boxes',
+    timerElId: 'otp-timer-text',
+    onAutoVerify: () => {
+      updatePipelineStageUI(3);
+      document.getElementById('forgot-stage-3').style.display = 'block';
+      setAuthAlert('success', '✅ Live Mobile OTP Verified! Set your new password below.');
+    }
+  });
 
-  let secondsLeft = 60;
-  const timerEl = document.getElementById('otp-timer-text');
-  if (otpCountdownInterval) clearInterval(otpCountdownInterval);
-  otpCountdownInterval = setInterval(() => {
-    secondsLeft -= 1;
-    if (secondsLeft <= 0) {
-      clearInterval(otpCountdownInterval);
-      activeRecoveryOTP = null;
-      if (timerEl) timerEl.textContent = 'Expired! Click Resend';
-    } else if (timerEl) timerEl.textContent = `Valid: ${secondsLeft}s`;
-  }, 1000);
+  if (sent) {
+    updatePipelineStageUI(2);
+    document.getElementById('forgot-stage-2').style.display = 'block';
+    document.getElementById('forgot-stage-3').style.display = 'none';
+    setAuthAlert('', '');
+  }
 }
 
 function setupAuthUI() {
   document.querySelectorAll('.auth-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       stopAuthCamera();
+      closeLiveSmsToast();
       const parentGate = btn.closest('#student-gate-container, #faculty-gate-container') || document;
       activateAuthSubTab(btn.dataset.authTab, parentGate);
       setAuthAlert('', '');
     });
   });
 
-  // Student Forgot Password Pipeline
-  document.getElementById('open-forgot-btn').addEventListener('click', () => {
-    stopAuthCamera();
-    activateAuthSubTab('forgot-password', document.getElementById('student-gate-container'));
-    resetForgotPipeline();
-    const prefill = document.getElementById('login-roll-id').value.trim().toUpperCase();
-    if (prefill) {
-      document.getElementById('forgot-roll-id').value = prefill;
-      const m = state.members.find(x => x.id.toUpperCase() === prefill);
-      if (m?.mobile) document.getElementById('forgot-mobile-input').value = m.mobile;
-    }
-    setAuthAlert('', '');
-  });
+  // Open Unified Forgot Password from either Student or Admin/HOD portal
+  document.getElementById('open-forgot-btn').addEventListener('click', () => openUnifiedForgotPanel('student'));
+  document.getElementById('open-fac-forgot-btn').addEventListener('click', () => openUnifiedForgotPanel('faculty'));
 
   document.getElementById('back-to-login-btn').addEventListener('click', () => {
-    resetForgotPipeline();
-    activateAuthSubTab('student-login', document.getElementById('student-gate-container'));
+    const type = document.getElementById('forgot-account-type').value;
+    switchPortalGate(type === 'faculty' ? 'faculty' : 'student');
   });
 
-  document.getElementById('send-otp-btn').addEventListener('click', dispatchMobileOTP);
-  document.getElementById('resend-otp-btn').addEventListener('click', dispatchMobileOTP);
+  document.getElementById('send-otp-btn').addEventListener('click', triggerForgotPasswordOtp);
+  document.getElementById('resend-otp-btn').addEventListener('click', triggerForgotPasswordOtp);
 
   document.getElementById('verify-otp-btn').addEventListener('click', () => {
-    const entered = document.getElementById('forgot-otp-input').value.trim();
-    if (!activeRecoveryOTP) { setAuthAlert('error', 'OTP expired. Click Resend.'); return; }
-    if (entered !== activeRecoveryOTP) { setAuthAlert('error', 'Incorrect 6-digit OTP.'); return; }
-    otpVerifiedStage = true;
-    if (otpCountdownInterval) clearInterval(otpCountdownInterval);
-    document.getElementById('otp-timer-text').textContent = '✅ Verified';
-    updatePipelineStageUI(3);
-    document.getElementById('forgot-stage-3').style.display = 'block';
-    setAuthAlert('success', '✅ Mobile OTP Verified! Set your new password below.');
+    const code = getOtpBoxesValue('forgot-otp-boxes');
+    if (otpSessions.forgot.code && code === otpSessions.forgot.code) {
+      otpSessions.forgot.verified = true;
+      updatePipelineStageUI(3);
+      document.getElementById('forgot-stage-3').style.display = 'block';
+      closeLiveSmsToast();
+      setAuthAlert('success', '✅ Live OTP Verified! Create your new password below.');
+    } else {
+      setAuthAlert('error', 'Enter all 6 digits of your live OTP first.');
+    }
   });
 
   document.getElementById('forgot-password-form').addEventListener('submit', async e => {
     e.preventDefault();
-    if (!otpVerifiedStage || !activeRecoveryRollId) { setAuthAlert('error', 'Verify OTP first.'); return; }
+    if (!otpSessions.forgot.verified) { setAuthAlert('error', 'Complete Live OTP verification first.'); return; }
     const p1 = document.getElementById('forgot-new-pass').value;
     const p2 = document.getElementById('forgot-confirm-pass').value;
-    if (p1.length < 4 || p1 !== p2) { setAuthAlert('error', 'Passwords must match (min 4 chars).'); return; }
-    const member = state.members.find(m => m.id.toUpperCase() === activeRecoveryRollId);
-    if (!member) return;
-    member.passwordHash = await hashPassword(p1);
-    logActivity(`Password reset via Mobile OTP for ${member.name}`, 'Security');
+    if (p1.length < 4 || p1 !== p2) { setAuthAlert('error', 'Passwords must match (min 4 characters).'); return; }
+
+    const isFac = otpSessions.forgot.accountType === 'faculty';
+    const list = isFac ? state.coordinators : state.members;
+    const acc = list.find(x => x.id.toUpperCase() === otpSessions.forgot.targetId);
+    if (!acc) return;
+
+    acc.passwordHash = await hashPassword(p1);
+    if (isFac && acc.id === 'HOD-ADMIN') state.coordinatorHash = acc.passwordHash;
+    logActivity(`Password reset via Live Mobile OTP for ${acc.name} (${acc.id})`, 'Security');
     window.saveState(state);
-    const savedId = member.id;
+
+    const savedId = acc.id;
     e.target.reset();
-    resetForgotPipeline();
-    activateAuthSubTab('student-login', document.getElementById('student-gate-container'));
-    document.getElementById('login-roll-id').value = savedId;
-    setAuthAlert('success', `✅ Password updated on Live DB for ${member.name} (${savedId})!`);
+    switchPortalGate(isFac ? 'faculty' : 'student');
+    if (isFac) document.getElementById('coord-id').value = savedId;
+    else document.getElementById('login-roll-id').value = savedId;
+    setAuthAlert('success', `✅ Password updated on Live Database for ${acc.name} (${savedId})!`);
+  });
+
+  // Student Registration Live OTP Dispatch
+  document.getElementById('reg-send-otp-btn').addEventListener('click', async () => {
+    const mobile = document.getElementById('reg-mobile').value.trim();
+    const rollId = document.getElementById('reg-roll-id').value.trim().toUpperCase() || 'STUDENT';
+    const sent = await dispatchLiveSmsOtp({
+      flowKey: 'reg',
+      targetId: rollId,
+      mobile,
+      purposeLabel: `Student Mobile Verification (${rollId})`,
+      boxesContainerId: 'reg-otp-boxes',
+      timerElId: 'reg-otp-timer',
+      onAutoVerify: () => {
+        const badge = document.getElementById('reg-otp-badge');
+        badge.className = 'badge badge-green';
+        badge.textContent = '✅ Mobile Verified';
+        setAuthAlert('success', '✅ Student Mobile Number Verified via Live OTP!');
+      }
+    });
+    if (sent) {
+      document.getElementById('reg-otp-section').style.display = 'block';
+      setAuthAlert('', '');
+    }
+  });
+
+  // Admin / HOD Registration Live OTP Dispatch
+  document.getElementById('fac-send-otp-btn').addEventListener('click', async () => {
+    const mobile = document.getElementById('fac-reg-mobile').value.trim();
+    const facId = document.getElementById('fac-reg-id').value.trim().toUpperCase() || 'ADMIN-HOD';
+    const sent = await dispatchLiveSmsOtp({
+      flowKey: 'fac',
+      targetId: facId,
+      mobile,
+      purposeLabel: `Admin / HOD Mobile Verification (${facId})`,
+      boxesContainerId: 'fac-otp-boxes',
+      timerElId: 'fac-otp-timer',
+      onAutoVerify: () => {
+        const badge = document.getElementById('fac-otp-badge');
+        badge.className = 'badge badge-green';
+        badge.textContent = '✅ Admin Mobile Verified';
+        setAuthAlert('success', '✅ Admin / HOD Mobile Number Verified via Live OTP!');
+      }
+    });
+    if (sent) {
+      document.getElementById('fac-otp-section').style.display = 'block';
+      setAuthAlert('', '');
+    }
   });
 
   // Student Sign In
@@ -257,16 +486,17 @@ function setupAuthUI() {
     if (idx === -1) { setAuthAlert('error', `Roll ID "${rollId}" not found.`); return; }
     const member = state.members[idx];
     if ((await hashPassword(pass)) !== member.passwordHash) { setAuthAlert('error', 'Incorrect password.'); return; }
-    if (member.status === 'pending') { setAuthAlert('warning', `⏳ Account Pending HOD/Coordinator Approval for ${member.name} (${member.id}).`); return; }
+    if (member.status === 'pending') { setAuthAlert('warning', `⏳ Account Pending Admin / HOD Approval for ${member.name} (${member.id}).`); return; }
     if (member.status === 'rejected') { setAuthAlert('error', `❌ Registration Rejected for ${member.id}.`); return; }
     stopAuthCamera();
+    closeLiveSmsToast();
     state.activeMemberIndex = idx;
     state.session = { role: 'student', memberId: member.id };
     window.saveState(state);
     checkSessionAndRender();
   });
 
-  // Student Self-Registration
+  // Student Self-Registration Submit
   document.getElementById('student-register-form').addEventListener('submit', async e => {
     e.preventDefault();
     const name = document.getElementById('reg-name').value.trim();
@@ -274,27 +504,39 @@ function setupAuthUI() {
     const mobile = document.getElementById('reg-mobile').value.trim().replace(/\D/g, '');
     const year = document.getElementById('reg-year').value;
     const pass = document.getElementById('reg-password').value;
-    if (mobile.length !== 10) { setAuthAlert('error', 'Enter a valid 10-digit mobile number.'); return; }
-    if (state.members.some(m => m.id.toUpperCase() === rollId)) { setAuthAlert('error', `Roll ID ${rollId} already exists.`); return; }
+
+    if (!otpSessions.reg.verified || otpSessions.reg.mobile !== mobile) {
+      setAuthAlert('error', '📲 Please click "Send Live OTP" and verify your 6-digit mobile OTP first.');
+      return;
+    }
+    if (state.members.some(m => m.id.toUpperCase() === rollId)) {
+      setAuthAlert('error', `Roll ID ${rollId} is already registered.`);
+      return;
+    }
 
     const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
     state.members.push({
-      name, id: rollId, mobile, year, initials, passwordHash: await hashPassword(pass), status: 'pending',
+      name, id: rollId, mobile, mobileVerified: true, year, initials, passwordHash: await hashPassword(pass), status: 'pending',
       registeredAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       streak: 1, xp: 500, faceRegistered: Boolean(signupFaceData),
       facePhoto: signupFaceData ? signupFaceData.thumbnail : null,
       faceDescriptor: signupFaceData ? signupFaceData.vector : null,
       performanceHistory: [75, 78, 80, 82, 85, 88], subjects: createBTechSubjects()
     });
-    logActivity(`New student registration: ${name} (${rollId}) — Pending Approval`, 'Registration');
+    logActivity(`OTP-Verified Student Registration: ${name} (${rollId}) — Pending Admin Approval`, 'Registration');
     window.saveState(state);
     updatePendingBadges();
+
     e.target.reset();
     signupFaceData = null;
+    otpSessions.reg.verified = false;
+    document.getElementById('reg-otp-section').style.display = 'none';
+    document.getElementById('reg-otp-badge').className = 'badge badge-amber';
+    document.getElementById('reg-otp-badge').textContent = 'Unverified';
     stopAuthCamera();
     activateAuthSubTab('student-login', document.getElementById('student-gate-container'));
     document.getElementById('login-roll-id').value = rollId;
-    setAuthAlert('warning', `✅ Registered ${name} (${rollId})! Switch to "👨‍🏫 HOD / Coordinator" portal to approve.`);
+    setAuthAlert('warning', `✅ Registered ${name} (${rollId}) with Verified Mobile! Switch to "🏛️ Admin / HOD / Coord" to approve.`);
   });
 
   // Student Face Capture on Register
@@ -320,7 +562,7 @@ function setupAuthUI() {
     }
   });
 
-  // ================= HOD / COORDINATOR SIGN IN & LIVE-PICTURE REGISTRATION =================
+  // Admin / HOD Sign In
   document.getElementById('coordinator-login-form').addEventListener('submit', async e => {
     e.preventDefault();
     const id = document.getElementById('coord-id').value.trim().toUpperCase();
@@ -329,25 +571,26 @@ function setupAuthUI() {
 
     const fac = state.coordinators.find(c => c.id.toUpperCase() === id);
     if (!fac) {
-      setAuthAlert('error', `Faculty / HOD ID "${id}" not found. Click "📝 Register HOD / Coord" to register.`);
+      setAuthAlert('error', `Admin / HOD ID "${id}" not found. Click "📝 Register Admin / HOD" to register.`);
       return;
     }
     if (enteredHash !== fac.passwordHash && !(id === 'HOD-ADMIN' && enteredHash === state.coordinatorHash)) {
-      setAuthAlert('error', 'Incorrect HOD / Coordinator password.');
+      setAuthAlert('error', 'Incorrect Admin / HOD password.');
       return;
     }
     if (fac.status !== 'approved') {
-      setAuthAlert('warning', `⏳ ${fac.name} (${fac.id}) is awaiting Master HOD verification in the Faculty Registry.`);
+      setAuthAlert('warning', `⏳ ${fac.name} (${fac.id}) is awaiting Master HOD verification in the Admin Registry.`);
       return;
     }
 
     stopAuthCamera();
+    closeLiveSmsToast();
     state.session = { role: 'coordinator', memberId: fac.id };
     window.saveState(state);
     checkSessionAndRender();
   });
 
-  // HOD / Coordinator Live Webcam Capture for Registration Verification
+  // Admin / HOD Live Webcam Capture
   document.getElementById('fac-cam-capture-btn').addEventListener('click', async () => {
     const video = document.getElementById('fac-reg-video');
     const preview = document.getElementById('fac-reg-preview');
@@ -379,7 +622,7 @@ function setupAuthUI() {
     }
   });
 
-  // HOD / Coordinator Live Photo File Upload for Registration Verification
+  // Admin / HOD Live Photo File Upload
   document.getElementById('fac-photo-upload').addEventListener('change', e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -401,7 +644,7 @@ function setupAuthUI() {
     reader.readAsDataURL(file);
   });
 
-  // Submit New HOD / Coordinator Registration
+  // Admin / HOD Registration Submit
   document.getElementById('coordinator-register-form').addEventListener('submit', async e => {
     e.preventDefault();
     const name = document.getElementById('fac-reg-name').value.trim();
@@ -412,16 +655,16 @@ function setupAuthUI() {
     const pass = document.getElementById('fac-reg-password').value;
     const deptCode = document.getElementById('fac-reg-code').value.trim().toUpperCase();
 
-    if (!facultyFaceData) {
-      setAuthAlert('error', '🪪 Mandatory Verification: Capture a live webcam picture or upload a live photo before registering.');
+    if (!otpSessions.fac.verified || otpSessions.fac.mobile !== mobile) {
+      setAuthAlert('error', '📲 Please click "Send Live OTP" and verify your 6-digit official mobile OTP first.');
       return;
     }
-    if (mobile.length !== 10) {
-      setAuthAlert('error', 'Enter a valid 10-digit mobile number.');
+    if (!facultyFaceData) {
+      setAuthAlert('error', '🪪 Mandatory Verification: Capture a live webcam picture or upload a live photo.');
       return;
     }
     if (state.coordinators.some(c => c.id.toUpperCase() === facId)) {
-      setAuthAlert('error', `Faculty ID "${facId}" is already registered.`);
+      setAuthAlert('error', `Admin / Faculty ID "${facId}" is already registered.`);
       return;
     }
 
@@ -434,6 +677,7 @@ function setupAuthUI() {
       designation,
       department,
       mobile,
+      mobileVerified: true,
       initials,
       passwordHash: await hashPassword(pass),
       status: autoApproved ? 'approved' : 'pending',
@@ -443,12 +687,16 @@ function setupAuthUI() {
       faceDescriptor: facultyFaceData.vector
     });
 
-    logActivity(`New ${designation}: ${name} (${facId}) registered with Live Picture`, 'Faculty');
+    logActivity(`New ${designation}: ${name} (${facId}) registered with Live OTP & Photo`, 'Admin Reg');
     window.saveState(state);
     updatePendingBadges();
 
     e.target.reset();
     facultyFaceData = null;
+    otpSessions.fac.verified = false;
+    document.getElementById('fac-otp-section').style.display = 'none';
+    document.getElementById('fac-otp-badge').className = 'badge badge-amber';
+    document.getElementById('fac-otp-badge').textContent = 'Unverified';
     document.getElementById('fac-reg-preview').style.display = 'none';
     document.getElementById('fac-photo-status').textContent = 'No live verification picture captured yet.';
     document.getElementById('fac-photo-status').style.color = 'var(--text-muted)';
@@ -457,19 +705,18 @@ function setupAuthUI() {
     document.getElementById('coord-id').value = facId;
 
     if (autoApproved) {
-      setAuthAlert('success', `✅ ${name} (${facId}) verified via Dept Key & Live Picture! Sign in now.`);
+      setAuthAlert('success', `✅ ${name} (${facId}) verified via Live OTP, Photo & Auth Key! Sign in now.`);
     } else {
-      setAuthAlert('warning', `⏳ ${name} (${facId}) registered with Live Picture! Sign in as Master HOD (HOD-ADMIN) to verify & approve.`);
+      setAuthAlert('warning', `⏳ ${name} (${facId}) registered! Sign in as Master HOD (HOD-ADMIN) to verify & approve.`);
     }
   });
 
-  // Faculty Face ID Sign-In
   document.getElementById('faculty-face-login-btn').addEventListener('click', startFacultyFaceSignIn);
-
   document.getElementById('face-login-toggle-btn').addEventListener('click', startFaceSignIn);
   document.getElementById('signout-btn').addEventListener('click', () => {
     stopCamera();
     stopAuthCamera();
+    closeLiveSmsToast();
     state.session = null;
     window.saveState(state);
     checkSessionAndRender();
@@ -481,7 +728,7 @@ async function startFacultyFaceSignIn() {
   const video = document.getElementById('faculty-face-video');
   const enrolled = state.coordinators.map((c, idx) => ({ c, idx })).filter(x => x.c.faceRegistered && x.c.faceDescriptor);
   if (!enrolled.length) {
-    setAuthAlert('warning', 'No HOD/Coordinator live pictures enrolled yet. Register first!');
+    setAuthAlert('warning', 'No Admin/HOD live pictures enrolled yet. Register first!');
     return;
   }
   try {
@@ -535,7 +782,7 @@ async function startFaceSignIn() {
       if (bestSim >= 0.90 && bestIdx !== -1) {
         const matched = state.members[bestIdx];
         stopAuthCamera();
-        if (matched.status !== 'approved') { setAuthAlert('warning', `Face matched (${matched.name}), awaiting HOD Approval.`); return; }
+        if (matched.status !== 'approved') { setAuthAlert('warning', `Face matched (${matched.name}), awaiting Admin/HOD Approval.`); return; }
         state.activeMemberIndex = bestIdx;
         state.session = { role: 'student', memberId: matched.id };
         window.saveState(state);
@@ -601,25 +848,23 @@ function checkSessionAndRender() {
   appLayout.style.display = 'grid';
 
   if (state.session.role === 'coordinator') {
-    // STRICT HOD / COORDINATOR (TEACHERS ONLY) WORKSPACE
     document.body.classList.remove('role-student');
     document.body.classList.add('role-hod');
 
     document.getElementById('sidebar-brand-icon').textContent = '🛡️';
-    document.getElementById('sidebar-brand-title').textContent = 'Faculty OS';
-    document.getElementById('sidebar-brand-sub').textContent = 'HOD & Coordinator Portal';
+    document.getElementById('sidebar-brand-title').textContent = 'Admin OS';
+    document.getElementById('sidebar-brand-sub').textContent = 'HOD & Faculty Governance';
     document.getElementById('sidebar-footer-icon').textContent = '🏛️';
-    document.getElementById('sidebar-streak').textContent = 'Teachers / HOD Only';
-    document.getElementById('sidebar-xp').textContent = 'Governance Mode';
+    document.getElementById('sidebar-streak').textContent = 'Admin / HOD Portal';
+    document.getElementById('sidebar-xp').textContent = 'Verified Session';
 
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('nav-coordinator-btn').classList.add('active');
     document.getElementById('view-coordinator').classList.add('active');
-    document.getElementById('page-title').textContent = 'HOD & Coordinator Governance Portal';
-    document.getElementById('page-subtitle').textContent = 'Dedicated Teachers & Admin Portal — Approve registrations, verify live photos & audit attendance';
+    document.getElementById('page-title').textContent = 'Admin, HOD & Coordinator Governance Portal';
+    document.getElementById('page-subtitle').textContent = 'Executive Governance Workspace — Approve registrations, verify live photos & audit attendance';
   } else {
-    // STRICT STUDENT WORKSPACE
     document.body.classList.remove('role-hod');
     document.body.classList.add('role-student');
 
@@ -643,7 +888,6 @@ function checkSessionAndRender() {
   renderAll();
 }
 
-// --- RENDER DEDICATED HOD / COORDINATOR PORTAL ---
 function renderCoordinatorPortal() {
   updatePendingBadges();
   const pendingStudents = state.members.filter(m => m.status === 'pending');
@@ -671,17 +915,16 @@ function renderCoordinatorPortal() {
   if (document.getElementById('coord-kpi-defaulters')) document.getElementById('coord-kpi-defaulters').textContent = defaulters.length;
   if (document.getElementById('coord-kpi-faces')) document.getElementById('coord-kpi-faces').textContent = `Biometric IDs: ${faces} / ${state.members.length}`;
 
-  // 1. Pending Student Approvals
   const pBody = document.getElementById('pending-approvals-body');
   if (pBody) {
     pBody.innerHTML = !pendingStudents.length
-      ? `<tr><td colspan="6" style="color:var(--text-muted);text-align:center;">🎉 All student registrations reviewed! No pending queue.</td></tr>`
+      ? `<tr><td colspan="6" style="color:var(--text-muted);text-align:center;">🎉 All student registrations reviewed! Queue is clear.</td></tr>`
       : pendingStudents.map(m => `
         <tr>
           <td>${m.facePhoto ? `<img src="${m.facePhoto}" class="roster-face-thumb"/>` : `<span class="badge badge-amber">No Photo</span>`}</td>
           <td><strong>${m.name}</strong><div style="font-size:0.72rem;color:var(--text-muted);">${m.registeredAt || 'Live'}</div></td>
           <td><span class="badge badge-cyan">${m.id}</span></td>
-          <td style="font-family:'JetBrains Mono',monospace;">+91-${m.mobile || 'N/A'}</td>
+          <td style="font-family:'JetBrains Mono',monospace;">+91-${m.mobile || 'N/A'} <span class="badge badge-green" style="font-size:0.65rem;">OTP ✓</span></td>
           <td>${m.year}</td>
           <td style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn-primary" style="padding:5px 11px;font-size:0.78rem;" onclick="setMemberApproval('${m.id}','approved')">✅ Approve</button>
@@ -691,9 +934,8 @@ function renderCoordinatorPortal() {
         </tr>`).join('');
   }
 
-  // 2. Registered HODs & Coordinators Table (With Live Verification Pictures)
   const facBadge = document.getElementById('faculty-count-badge');
-  if (facBadge) facBadge.textContent = `${(state.coordinators || []).length} Registered Faculty`;
+  if (facBadge) facBadge.textContent = `${(state.coordinators || []).length} Registered Admins/HODs`;
 
   const facBody = document.getElementById('faculty-registry-body');
   if (facBody) {
@@ -716,14 +958,13 @@ function renderCoordinatorPortal() {
           <td><strong>${c.name}</strong><div style="font-size:0.72rem;color:var(--text-muted);">${c.registeredAt || 'Verified'}</div></td>
           <td><span class="badge badge-amber">${c.id}</span></td>
           <td><strong>${c.designation}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${c.department}</div></td>
-          <td style="font-family:'JetBrains Mono',monospace;">+91-${c.mobile || 'N/A'}</td>
+          <td style="font-family:'JetBrains Mono',monospace;">+91-${c.mobile || 'N/A'} <span class="badge badge-green" style="font-size:0.65rem;">OTP ✓</span></td>
           <td>${stBadge}</td>
           <td>${actionBtn}</td>
         </tr>`;
     }).join('');
   }
 
-  // 3. Defaulters Watchlist (<75%)
   const defBody = document.getElementById('hod-defaulters-body');
   if (defBody) {
     defBody.innerHTML = !defaulters.length
@@ -736,7 +977,6 @@ function renderCoordinatorPortal() {
         </tr>`).join('');
   }
 
-  // 4. Recent Biometric Check-Ins
   const auditBody = document.getElementById('hod-live-audit-body');
   if (auditBody) {
     auditBody.innerHTML = !state.liveLogs?.length
@@ -750,7 +990,6 @@ function renderCoordinatorPortal() {
         </tr>`).join('');
   }
 
-  // 5. Searchable & Editable Complete Batch Student Registry
   const searchQuery = (document.getElementById('hod-search-input')?.value || '').trim().toLowerCase();
   const statusFilter = document.getElementById('hod-status-filter')?.value || 'ALL';
   const filteredMembers = state.members.filter(m => {
@@ -821,7 +1060,7 @@ function setFacultyApproval(facId, status) {
   const c = (state.coordinators || []).find(x => x.id === facId);
   if (!c) return;
   c.status = status;
-  logActivity(`Master HOD ${status.toUpperCase()} ${c.designation} ${c.name} (${c.id})`, 'Faculty');
+  logActivity(`Master HOD ${status.toUpperCase()} ${c.designation} ${c.name} (${c.id})`, 'Admin');
   window.saveState(state);
   renderAll();
   showToast(`✅ ${c.name} (${c.id}) set to ${status.toUpperCase()}!`);
