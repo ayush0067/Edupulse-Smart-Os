@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ================= 0A. COLLEGE TIMETABLE ENGINE (9:30 AM - 4:20 PM | 50-MIN PERIODS) =================
-window.syncLiveSubjectToCurrentPeriod = function () {
+window.getCurrentPeriodSubjectIdx = function () { return collegeScheduleState.activePeriod ? collegeScheduleState.activePeriod.subjectIdx : null; }; window.syncLiveSubjectToCurrentPeriod = function () {
   const sSel = document.getElementById('live-subject-select');
   const period = collegeScheduleState.activePeriod;
   if (!sSel || !period) return;
@@ -705,7 +705,7 @@ async function pullFromFirebase(forceMerge = false) {
       }
     }
 
-    if (forceMerge || (remote.updatedAt || 0) > (state.updatedAt || 0) || remoteMembers.length !== state.members.length) {
+    const remoteSig = JSON.stringify(remoteMembers.map(x => [x.id, x.status, x.faceRegistered, x.xp, (x.subjects || []).reduce((a, s) => a + s.attended, 0)])); const localSig = JSON.stringify(state.members.map(x => [x.id, x.status, x.faceRegistered, x.xp, (x.subjects || []).reduce((a, s) => a + s.attended, 0)])); if (forceMerge || remoteSig !== localSig || remoteLogs.length !== state.liveLogs.length) {
       applyIncomingLiveState({
         updatedAt: Math.max(remote.updatedAt || Date.now(), state.updatedAt || 0),
         members: remoteMembers,
@@ -738,7 +738,7 @@ function connectCloudLiveStream(roomName) {
 
 function applyIncomingLiveState(incoming, sourceLabel, forceApply = false) {
   if (!incoming || !Array.isArray(incoming.members)) return;
-  if (!forceApply && (incoming.updatedAt || 0) <= (state.updatedAt || 0) && incoming.members.length === state.members.length) return;
+  const inSig = JSON.stringify(incoming.members.map(x => [x.id, x.status, x.faceRegistered, x.xp, (x.subjects || []).reduce((a, s) => a + s.attended, 0)])); const curSig = JSON.stringify(state.members.map(x => [x.id, x.status, x.faceRegistered, x.xp, (x.subjects || []).reduce((a, s) => a + s.attended, 0)])); if (!forceApply && inSig === curSig && (incoming.liveLogs || []).length === (state.liveLogs || []).length) return;
 
   const prevPending = state.members.filter(m => m.status === 'pending').length;
   const newPending = incoming.members.filter(m => m.status === 'pending').length;
@@ -998,7 +998,7 @@ function upgradeAdvancedFaceSystem() {
     const banner = document.getElementById('face-match-banner');
     const reticle = document.getElementById('face-reticle');
     const label = document.getElementById('reticle-label');
-    if (!liveStream || video.readyState < 2) { showToast('Start camera first!'); return; }
+    if (!liveStream) { await window.toggleCamera(); await new Promise(r => setTimeout(r, 700)); } if (!liveStream || video.readyState < 2) { showToast('Allow webcam access first!'); return; }
 
     const idx = state.session?.role === 'student'
       ? state.members.findIndex(x => x.id === state.session.memberId)
@@ -1418,3 +1418,4 @@ async function updateDynamicQRToken() {
   if (document.getElementById('qr-token-text')) document.getElementById('qr-token-text').textContent = `EP-${m.id}-${hex}`;
   if (document.getElementById('qr-timer-badge')) document.getElementById('qr-timer-badge').textContent = `${left}s`;
 }
+

@@ -430,3 +430,21 @@ body.role-hod .student-only { display: none !important; }
   text-align: center;
   margin: 8px 0;
 }
+
+/* Compact Above-the-Fold Live Scanner Layout */
+#view-live .live-grid {
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 16px;
+  align-items: start;
+}
+#view-live .glass-card {
+  padding: 16px 18px;
+}
+#view-live .camera-box {
+  aspect-ratio: 16 / 9;
+  max-height: 235px;
+}
+#view-live .face-reticle {
+  width: 165px;
+  height: 175px;
+}

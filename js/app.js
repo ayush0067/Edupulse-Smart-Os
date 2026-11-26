@@ -55,9 +55,9 @@ function setupControls() {
     if (k !== null) localStorage.setItem('edupulse_gemini_key', k.trim());
   });
   document.getElementById('ai-generate-btn')?.addEventListener('click', handleAIGenerate);
-  document.getElementById('start-cam-btn')?.addEventListener('click', toggleCamera);
-  document.getElementById('register-face-btn')?.addEventListener('click', registerMemberFace);
-  document.getElementById('verify-live-btn')?.addEventListener('click', verifyLiveFaceAttendance);
+  document.getElementById('start-cam-btn')?.addEventListener('click', () => toggleCamera());
+  document.getElementById('register-face-btn')?.addEventListener('click', () => registerMemberFace());
+  document.getElementById('verify-live-btn')?.addEventListener('click', () => verifyLiveFaceAttendance());
   document.getElementById('export-hod-btn')?.addEventListener('click', exportHODReportCSV);
 
   document.getElementById('toggle-add-member-btn')?.addEventListener('click', () => {
@@ -259,7 +259,9 @@ function renderLiveAttendanceUI() {
 
   if (rc) rc.textContent = state.members.length;
 
+  // Allow clicking Register Face ID anytime (it auto-starts the camera if needed)
   if (regBtn && verifyBtn && loggedInStudent) {
+    regBtn.disabled = false;
     if (!loggedInStudent.faceRegistered) {
       regBtn.className = 'btn-primary';
       regBtn.textContent = '🪪 Step 1: Register Face ID Now';
@@ -285,8 +287,12 @@ function renderLiveAttendanceUI() {
     }
     if (sSel) {
       sSel.innerHTML = loggedInStudent.subjects.map((s, i) => `<option value="${i}" ${s.todayStatus ? 'disabled' : ''}>${s.code} — ${s.name}${s.todayStatus ? ' [🔒 Locked]' : ''}</option>`).join('');
-      if (prevSub && sSel.querySelector(`option[value="${prevSub}"]:not(:disabled)`)) sSel.value = prevSub;
-      if (typeof window.syncLiveSubjectToCurrentPeriod === 'function') window.syncLiveSubjectToCurrentPeriod();
+      const activePeriodIdx = typeof window.getCurrentPeriodSubjectIdx === 'function' ? window.getCurrentPeriodSubjectIdx() : null;
+      if (activePeriodIdx !== null && sSel.querySelector(`option[value="${activePeriodIdx}"]:not(:disabled)`)) {
+        sSel.value = String(activePeriodIdx);
+      } else if (prevSub && sSel.querySelector(`option[value="${prevSub}"]:not(:disabled)`)) {
+        sSel.value = prevSub;
+      }
     }
     if (rb) {
       rb.innerHTML = state.members.map(m => {
@@ -307,8 +313,12 @@ function renderLiveAttendanceUI() {
     const tm = state.members[Number(mSel?.value || state.activeMemberIndex)] || getActiveMember(state);
     if (sSel && tm) {
       sSel.innerHTML = tm.subjects.map((s, i) => `<option value="${i}" ${s.todayStatus ? 'disabled' : ''}>${s.code} — ${s.name}${s.todayStatus ? ' [🔒 Locked]' : ''}</option>`).join('');
-      if (prevSub && sSel.querySelector(`option[value="${prevSub}"]:not(:disabled)`)) sSel.value = prevSub;
-      if (typeof window.syncLiveSubjectToCurrentPeriod === 'function') window.syncLiveSubjectToCurrentPeriod();
+      const activePeriodIdx = typeof window.getCurrentPeriodSubjectIdx === 'function' ? window.getCurrentPeriodSubjectIdx() : null;
+      if (activePeriodIdx !== null && sSel.querySelector(`option[value="${activePeriodIdx}"]:not(:disabled)`)) {
+        sSel.value = String(activePeriodIdx);
+      } else if (prevSub && sSel.querySelector(`option[value="${prevSub}"]:not(:disabled)`)) {
+        sSel.value = prevSub;
+      }
     }
     if (rb) {
       rb.innerHTML = state.members.map((m, i) => {
