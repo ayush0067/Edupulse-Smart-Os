@@ -1,6 +1,4 @@
-﻿                                 // js/app.js
-                                 
-let state = loadState();
+﻿let state = loadState();
 if (!state.liveLogs) state.liveLogs = [];
 let selectedQuestionId = null;
 let liveStream = null;
@@ -10,7 +8,7 @@ let matchedConfidence = 0;
 
 const VIEW_META = {
   dashboard: ['Dashboard Overview', 'Real-time attendance, biometric ID & study insights'],
-  attendance: ['Smart Attendance Tracker', 'Once marked for today, attendance is permanently locked (Cannot Reverse)'],
+  attendance: ['Smart Attendance Tracker', 'Only HOD-approved, biometrically registered students can mark attendance'],
   live: ['Live Face Registration & Attendance', 'Enroll student biometrics & verify attendance live'],
   academics: ['Academics & Study Insights', 'Detailed B.Tech subject marks & AI focus recommendations'],
   solver: ['In-App Problem Solver', 'B.Tech questions — Once answered, options lock permanently'],
@@ -153,38 +151,82 @@ function renderRecentActivity() {
   if (list) list.innerHTML = state.activities.slice(0, 5).map(a => `<li><div><strong>${a.text}</strong><div style="color:var(--text-muted);font-size:0.78rem;">${a.time}</div></div><span class="badge badge-cyan">${a.tag}</span></li>`).join('');
 }
 
+function goToLiveFaceForSubject(subjectIdx) {
+  const liveBtn = document.querySelector('.nav-btn[data-view="live"]');
+  if (liveBtn) liveBtn.click();
+  setTimeout(() => {
+    const sSel = document.getElementById('live-subject-select');
+    if (sSel) sSel.value = String(subjectIdx);
+  }, 50);
+}
+
 function renderAttendanceCards() {
   const m = getActiveMember(state);
   const grid = document.getElementById('attendance-cards-grid');
   if (!grid || !m) return;
+
+  const isApproved = m.status === 'approved';
+  const hasFace = Boolean(m.faceRegistered);
+
   grid.innerHTML = m.subjects.map((s, idx) => {
     const pct = s.total ? Math.round((s.attended / s.total) * 100) : 0;
     const isSafe = s.total === 0 || pct >= 75;
     const locked = Boolean(s.todayStatus);
-    const guide = s.total === 0 ? 'Mark your first class today' : (isSafe ? `Can miss ${Math.max(0, Math.floor((s.attended - 0.75 * s.total) / 0.75))} classes` : `Attend next ${Math.ceil((0.75 * s.total - s.attended) / 0.25)} classes`);
-    const action = locked
-      ? `<div class="lock-banner ${s.todayStatus}"><span>🔒 Locked: ${s.todayStatus.toUpperCase()} (${s.todayTime})</span><span>Irreversible</span></div>`
-      : `<div class="subject-actions"><button class="btn-primary" onclick="markAttendanceForMember(${state.activeMemberIndex},${idx},true)">+ Present (+25 XP)</button><button class="btn-outline" onclick="markAttendanceForMember(${state.activeMemberIndex},${idx},false)">Absent</button></div>`;
-    return `<div class="subject-card ${locked ? 'locked-card' : ''}"><div class="card-header" style="margin-bottom:6px;"><div><strong>${s.name}</strong><div style="color:var(--text-muted);font-size:0.78rem;">${s.code} • ${s.yearTag}</div></div><span class="badge ${isSafe ? 'badge-green' : 'badge-red'}">${s.total === 0 ? 'New' : (isSafe ? 'On Track' : 'At Risk')}</span></div><div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${isSafe ? 'var(--green)' : 'var(--red)'};"></div></div><div class="subject-stats"><span>Attended: <strong>${s.attended}/${s.total}</strong></span><span><strong>${pct}%</strong></span></div><div style="font-size:0.82rem;color:${isSafe ? 'var(--green)' : 'var(--red)'};">${guide}</div>${action}</div>`;
+    const guide = s.total === 0
+      ? 'Requires Approved Student + Face ID Scan'
+      : (isSafe ? `Can miss ${Math.max(0, Math.floor((s.attended - 0.75 * s.total) / 0.75))} classes` : `Attend next ${Math.ceil((0.75 * s.total - s.attended) / 0.25)} classes`);
+
+    let action = '';
+    if (locked) {
+      action = `<div class="lock-banner ${s.todayStatus}"><span>🔒 Locked: ${s.todayStatus.toUpperCase()} (${s.todayTime})</span><span>Irreversible</span></div>`;
+    } else if (!isApproved) {
+      action = `<div class="lock-banner absent"><span>⏳ Pending HOD Approval</span><span>Account Locked</span></div>`;
+    } else if (!hasFace) {
+      action = `<div class="subject-actions"><button class="btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="goToLiveFaceForSubject(${idx})">🪪 Register Face ID First</button></div>`;
+    } else {
+      action = `<div class="subject-actions"><button class="btn-primary" onclick="goToLiveFaceForSubject(${idx})">📷 Scan Face to Mark Present</button></div>`;
+    }
+
+    return `<div class="subject-card ${locked ? 'locked-card' : ''}"><div class="card-header" style="margin-bottom:6px;"><div><strong>${s.name}</strong><div style="color:var(--text-muted);font-size:0.78rem;">${s.code} • ${s.yearTag}</div></div><span class="badge ${isSafe ? 'badge-green' : 'badge-red'}">${s.total === 0 ? 'Registered' : (isSafe ? 'On Track' : 'At Risk')}</span></div><div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${isSafe ? 'var(--green)' : 'var(--red)'};"></div></div><div class="subject-stats"><span>Attended: <strong>${s.attended}/${s.total}</strong></span><span><strong>${pct}%</strong></span></div><div style="font-size:0.82rem;color:${isSafe ? 'var(--green)' : 'var(--red)'};">${guide}</div>${action}</div>`;
   }).join('');
 }
 
 function markAttendanceForMember(mIdx, sIdx, isPresent, viaFace = false) {
+  if (!state.session) {
+    showToast('🚫 Sign in with a registered student account first.');
+    return false;
+  }
+
   const m = state.members[mIdx];
   if (!m) return false;
+
+  // Strict Registered Student Verification Checks
+  if (state.session.role === 'student' && m.id !== state.session.memberId) {
+    showToast('🚫 Security Lock: You can only mark attendance for your own registered account.');
+    return false;
+  }
+  if (m.status !== 'approved') {
+    showToast(`🚫 Account Not Approved: ${m.name} (${m.id}) must be approved by HOD first.`);
+    return false;
+  }
+  if (!m.faceRegistered || !viaFace) {
+    showToast('🪪 Biometric Verification Required: Complete live face scan to mark attendance.');
+    return false;
+  }
+
   const s = m.subjects[sIdx];
   if (!s || s.todayStatus) return false;
+
   s.total += 1;
   s.todayTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (isPresent) {
     s.attended += 1;
     s.todayStatus = 'present';
-    const xp = viaFace ? 40 : 25;
-    m.xp += xp;
-    logActivity(`${m.name}: Locked Present in ${s.code} (+${xp} XP)`, viaFace ? 'Face ID' : 'Attendance');
+    m.xp += 40;
+    logActivity(`${m.name} (${m.id}): Verified Biometric Present in ${s.code} (+40 XP)`, 'Verified Student');
   } else {
     s.todayStatus = 'absent';
-    logActivity(`${m.name}: Locked Absent in ${s.code}`, 'Attendance');
+    logActivity(`${m.name} (${m.id}): Locked Absent in ${s.code}`, 'Attendance');
   }
   window.saveState(state);
   renderAll();
@@ -202,16 +244,42 @@ function renderLiveAttendanceUI() {
   const rb = document.getElementById('members-roster-body');
   const lb = document.getElementById('live-log-body');
 
+  const isStudentSession = state.session?.role === 'student';
+  const loggedInStudent = isStudentSession
+    ? state.members.find(m => m.id === state.session.memberId)
+    : null;
+
   if (rc) rc.textContent = state.members.length;
 
   if (!state.members.length) {
-    if (mSel) mSel.innerHTML = `<option value="">No students registered yet</option>`;
+    if (mSel) { mSel.innerHTML = `<option value="">No students registered yet</option>`; mSel.disabled = true; }
     if (sSel) sSel.innerHTML = `<option value="">Register a student first</option>`;
     if (rb) rb.innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);text-align:center;">No students registered yet.</td></tr>`;
+  } else if (isStudentSession && loggedInStudent) {
+    // Lock selector exclusively to the signed-in registered student
+    const myIdx = state.members.findIndex(m => m.id === loggedInStudent.id);
+    if (mSel) {
+      mSel.innerHTML = `<option value="${myIdx}">${loggedInStudent.name} (${loggedInStudent.id}) — Verified Session</option>`;
+      mSel.value = String(myIdx);
+      mSel.disabled = true;
+    }
+    if (sSel) {
+      sSel.innerHTML = loggedInStudent.subjects.map((s, i) => `<option value="${i}" ${s.todayStatus ? 'disabled' : ''}>${s.code} — ${s.name}${s.todayStatus ? ' [🔒 Locked]' : ''}</option>`).join('');
+    }
+    if (rb) {
+      rb.innerHTML = state.members.map(m => {
+        const t = m.subjects.reduce((a, s) => ({ att: a.att + s.attended, tot: a.tot + s.total }), { att: 0, tot: 0 });
+        const pct = t.tot ? Math.round((t.att / t.tot) * 100) : 0;
+        const isSelf = m.id === loggedInStudent.id;
+        return `<tr style="${isSelf ? 'background:rgba(34,211,238,0.06);' : ''}"><td>${m.facePhoto ? `<img src="${m.facePhoto}" class="roster-face-thumb"/>` : `<div class="avatar" style="width:32px;height:32px;font-size:0.75rem;">${m.initials}</div>`}</td><td><strong>${m.name}</strong><div style="font-size:0.74rem;color:var(--text-muted);">${m.id}</div></td><td><strong>${pct}%</strong></td><td><span class="badge ${m.faceRegistered ? 'badge-green' : 'badge-amber'}">${m.faceRegistered ? '✅ Registered' : '⚠️ Pending'}</span></td><td>${isSelf ? '<span class="badge badge-cyan">Active User</span>' : '<span style="color:var(--text-muted);font-size:0.75rem;">Locked</span>'}</td></tr>`;
+      }).join('');
+    }
   } else {
+    // HOD / Coordinator Classroom Scanner Mode
     if (mSel) {
       const prev = mSel.value;
-      mSel.innerHTML = state.members.map((m, i) => `<option value="${i}">${m.name} (${m.id}) ${m.faceRegistered ? '✅' : '⚠️'}</option>`).join('');
+      mSel.disabled = false;
+      mSel.innerHTML = state.members.map((m, i) => `<option value="${i}">${m.name} (${m.id}) ${m.status === 'approved' ? (m.faceRegistered ? '✅' : '⚠️') : '⏳ Unapproved'}</option>`).join('');
       mSel.value = prev !== '' && state.members[Number(prev)] ? prev : String(state.activeMemberIndex);
     }
     const tm = state.members[Number(mSel?.value || state.activeMemberIndex)] || getActiveMember(state);
@@ -234,7 +302,12 @@ function renderLiveAttendanceUI() {
   }
 }
 
-function selectMemberForFaceReg(i) { state.activeMemberIndex = i; window.saveState(state); renderAll(); }
+function selectMemberForFaceReg(i) {
+  if (state.session?.role === 'student') return;
+  state.activeMemberIndex = i;
+  window.saveState(state);
+  renderAll();
+}
 
 function extractFaceDescriptor(videoEl) {
   const canvas = document.getElementById('face-process-canvas');
@@ -276,7 +349,7 @@ async function toggleCamera() {
     document.getElementById('camera-box').classList.add('scanning');
     document.getElementById('start-cam-btn').textContent = '⏹ Stop Camera';
     document.getElementById('register-face-btn').disabled = false;
-    document.getElementById('verify-live-btn').disabled = false;
+    document.getElementById('verify-live-btn').disabled = true;
     startContinuousFaceScan();
   } catch { showToast('Allow webcam permission in browser.'); }
 }
@@ -292,70 +365,9 @@ function stopCamera() {
   const b = document.getElementById('start-cam-btn'); if (b) b.textContent = '📷 Start Camera';
 }
 
-function startContinuousFaceScan() {
-  const video = document.getElementById('live-video');
-  const reticle = document.getElementById('face-reticle');
-  const label = document.getElementById('reticle-label');
-  const banner = document.getElementById('face-match-banner');
-
-  faceScanTimer = setInterval(() => {
-    if (!liveStream || video.readyState < 2) return;
-    const enrolled = state.members.map((m, idx) => ({ m, idx })).filter(x => x.m.faceRegistered && x.m.faceDescriptor);
-    if (!enrolled.length) { banner.textContent = '⚠️ No student faces enrolled yet.'; return; }
-    const sample = extractFaceDescriptor(video);
-    let bestIdx = -1, bestSim = -1;
-    enrolled.forEach(({ m, idx }) => {
-      if (m.faceDescriptor.length === sample.vector.length) {
-        const sim = cosineSimilarity(sample.vector, m.faceDescriptor);
-        if (sim > bestSim) { bestSim = sim; bestIdx = idx; }
-      }
-    });
-    const pct = Math.min(99.4, Math.max(0, bestSim * 100)).toFixed(1);
-    if (bestSim >= 0.90 && bestIdx !== -1) {
-      matchedMemberIndex = bestIdx; matchedConfidence = pct;
-      reticle.classList.add('matched');
-      label.textContent = `${state.members[bestIdx].id} (${pct}%)`;
-      banner.classList.add('verified');
-      banner.textContent = `✅ Face Matched: ${state.members[bestIdx].name} (${pct}%)`;
-    } else {
-      matchedMemberIndex = null;
-      reticle.classList.remove('matched');
-      label.textContent = 'SCANNING FACE...';
-      banner.classList.remove('verified');
-      banner.textContent = `🔍 Scanning... Similarity: ${pct}%`;
-    }
-  }, 450);
-}
-
-function registerMemberFace() {
-  if (!state.members.length) { showToast('Register a student first!'); return; }
-  const video = document.getElementById('live-video');
-  if (!liveStream || video.readyState < 2) return;
-  const idx = Number(document.getElementById('live-member-select').value);
-  const m = state.members[idx];
-  if (!m) return;
-  const sample = extractFaceDescriptor(video);
-  m.faceRegistered = true; m.facePhoto = sample.thumbnail; m.faceDescriptor = sample.vector; m.xp += 50;
-  logActivity(`Registered Face ID for ${m.name} (+50 XP)`, 'Face ID');
-  window.saveState(state);
-  renderAll();
-  showToast(`🪪 Face ID Registered for ${m.name}!`);
-}
-
-function verifyLiveFaceAttendance() {
-  if (!state.members.length) { showToast('No students registered yet.'); return; }
-  const idx = matchedMemberIndex !== null ? matchedMemberIndex : Number(document.getElementById('live-member-select').value);
-  const m = state.members[idx];
-  if (!m) return;
-  if (!m.faceRegistered) { showToast(`Register Face ID for ${m.name} first!`); return; }
-  const sIdx = Number(document.getElementById('live-subject-select').value);
-  const s = m.subjects[sIdx];
-  if (!markAttendanceForMember(idx, sIdx, true, true)) { showToast('Already locked today!'); return; }
-  const now = new Date();
-  state.liveLogs.unshift({ date: now.toLocaleDateString(), time: now.toLocaleTimeString(), studentName: m.name, studentId: m.id, subject: `${s.code} (${s.name})`, confidence: `${matchedConfidence || '94.2'}% Match` });
-  window.saveState(state);
-  renderLiveAttendanceUI();
-}
+function startContinuousFaceScan() {}
+function registerMemberFace() {}
+function verifyLiveFaceAttendance() {}
 
 function exportHODReportCSV() {
   const rows = [['Date', 'Time', 'Name', 'ID', 'Subject', 'Status'], ...state.liveLogs.map(l => [l.date, l.time, l.studentName, l.studentId, l.subject, 'LOCKED'])];

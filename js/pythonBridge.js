@@ -8,12 +8,12 @@ let liveSyncChannel = null;
 let cloudEventSource = null;
 let geoWatchId = null;
 
-// Official KIPM College of Engineering & Technology, Plot BL 1&2, Sector 9, GIDA, Gorakhpur
+// Official KIPM College of Engineering & Technology, Sector 9, GIDA, Gorakhpur
 const KIPM_CAMPUS = {
   name: 'KIPM College of Engineering & Technology, Sector 9, GIDA',
   lat: 26.741022,
   lng: 83.270194,
-  radiusMeters: 800 // 800m accounts for laptop Wi-Fi geolocation accuracy inside GIDA Sector 9
+  radiusMeters: 800
 };
 
 // College Timetable: 9:30 AM - 4:20 PM | 7 x 50-Minute Periods | Lunch 12:50 PM - 1:50 PM Locked
@@ -233,14 +233,12 @@ function startGeoWatch() {
   }
   if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
 
-  // Fast initial Wi-Fi/Network fix for laptops
   navigator.geolocation.getCurrentPosition(handleGeoPosition, handleGeoError, {
     enableHighAccuracy: false,
     maximumAge: 60000,
     timeout: 6000
   });
 
-  // Continuous high-accuracy watch
   geoWatchId = navigator.geolocation.watchPosition(handleGeoPosition, handleGeoError, {
     enableHighAccuracy: true,
     maximumAge: 10000,
@@ -338,9 +336,42 @@ function updateGeofenceUI() {
   }
 }
 
+function getEligibleSessionStudent() {
+  if (!state.session) return null;
+  if (state.session.role === 'student') {
+    return state.members.find(m => m.id === state.session.memberId) || null;
+  }
+  return null;
+}
+
 function syncVerifyButtonState() {
   const verifyBtn = document.getElementById('verify-live-btn');
   if (!verifyBtn) return;
+
+  if (!state.session) {
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = '🔒 Sign In Required';
+    return;
+  }
+
+  if (state.session.role === 'student') {
+    const self = getEligibleSessionStudent();
+    if (!self) {
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = '🚫 Unregistered Student';
+      return;
+    }
+    if (self.status !== 'approved') {
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = '⏳ Pending HOD Approval';
+      return;
+    }
+    if (!self.faceRegistered) {
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = '🪪 Register Your Face ID First';
+      return;
+    }
+  }
 
   if (!liveStream) {
     verifyBtn.disabled = true;
@@ -609,7 +640,7 @@ async function recordTamperProofEvent(rollId, action) {
   } catch {}
 }
 
-// ================= 2. ILLUMINATION-NORMALIZED 392-D FACE ALIGNMENT & TRIPLE-GATE GUARD =================
+// ================= 2. REGISTERED-STUDENT ONLY + 392-D FACE ALIGNMENT & TRIPLE-GATE GUARD =================
 function normalizeVectorZeroMean(arr) {
   const mean = arr.reduce((s, v) => s + v, 0) / (arr.length || 1);
   const centered = arr.map(v => v - mean);
@@ -620,6 +651,26 @@ function normalizeVectorZeroMean(arr) {
 function upgradeAdvancedFaceSystem() {
   const origMark = window.markAttendanceForMember;
   window.markAttendanceForMember = function (mIdx, sIdx, isPresent, viaFace = false) {
+    if (!state.session) {
+      showToast('🚫 Sign in with a registered student account first.');
+      return false;
+    }
+    const targetMember = state.members[mIdx];
+    if (!targetMember) return false;
+
+    if (state.session.role === 'student' && targetMember.id !== state.session.memberId) {
+      showToast('🚫 Security Lock: You can only mark attendance for your own registered account.');
+      return false;
+    }
+    if (targetMember.status !== 'approved') {
+      showToast(`🚫 Account Not Approved: ${targetMember.name} (${targetMember.id}) requires HOD approval.`);
+      return false;
+    }
+    if (!targetMember.faceRegistered || !viaFace) {
+      showToast('🪪 Biometric Required: Complete live face scan to mark attendance.');
+      return false;
+    }
+
     evaluateCollegeSchedule();
     if (!collegeScheduleState.allowed) {
       showToast(`🚫 Blocked: ${collegeScheduleState.statusText}`);
@@ -641,7 +692,6 @@ function upgradeAdvancedFaceSystem() {
     syncVerifyButtonState();
   };
 
-  // Illumination-Normalized 392-D Spatial Descriptor + Reticle Alignment Check
   window.extractFaceDescriptor = function (videoEl) {
     const canvas = document.getElementById('face-process-canvas');
     const ctx = canvas.getContext('2d');
@@ -707,7 +757,6 @@ function upgradeAdvancedFaceSystem() {
     prevFrameLuma = lumaGrid;
     liveHumanConfirmed = motionDelta > 0.0006;
 
-    // L2-normalized raw vector (compatible with already-enrolled templates) + zero-mean normalized vector
     const norm = Math.sqrt(rawDesc.reduce((s, v) => s + v * v, 0)) || 1;
     const l2Vec = rawDesc.map(v => v / norm);
     const zVec = normalizeVectorZeroMean(rawDesc);
@@ -734,15 +783,19 @@ function upgradeAdvancedFaceSystem() {
     const label = document.getElementById('reticle-label');
     if (!liveStream || video.readyState < 2) { showToast('Start camera first!'); return; }
 
+    // Students can only register Face ID for their own logged-in account
+    const idx = state.session?.role === 'student'
+      ? state.members.findIndex(x => x.id === state.session.memberId)
+      : Number(document.getElementById('live-member-select').value);
+    const m = state.members[idx];
+    if (!m) return;
+
     const initialSample = window.extractFaceDescriptor(video);
     if (!initialSample.qualityOk) {
       showToast(`⚠️ Alignment Required: ${initialSample.alignReason} (Light: ${initialSample.brightness}%)`);
       return;
     }
 
-    const idx = Number(document.getElementById('live-member-select').value);
-    const m = state.members[idx];
-    if (!m) return;
     regBtn.disabled = true;
 
     const poses = ['Pose 1/3: Look Straight', 'Pose 2/3: Turn Slightly Left', 'Pose 3/3: Turn Slightly Right'];
@@ -783,24 +836,25 @@ function upgradeAdvancedFaceSystem() {
     faceScanTimer = setInterval(() => {
       if (!liveStream || video.readyState < 2) return;
       const sample = window.extractFaceDescriptor(video);
+
+      // ONLY consider HOD-approved & biometrically registered students
       const enrolled = state.members
         .map((m, idx) => ({ m, idx }))
-        .filter(x => x.m.faceRegistered && x.m.faceDescriptor && x.m.faceDescriptor.length === sample.vector.length);
+        .filter(x => x.m.status === 'approved' && x.m.faceRegistered && x.m.faceDescriptor && x.m.faceDescriptor.length === sample.vector.length);
 
       if (!enrolled.length) {
         matchedMemberIndex = null;
         faceAlignmentState.aligned = false;
         faceAlignmentState.streak = 0;
-        faceAlignmentState.reason = 'No Faces Enrolled';
+        faceAlignmentState.reason = 'No Approved Face ID';
         banner.classList.remove('verified');
-        banner.textContent = `⚠️ Register a student Face ID first (${sample.alignReason})`;
+        banner.textContent = `⚠️ Only HOD-approved students with enrolled Face ID can mark attendance (${sample.alignReason})`;
         syncVerifyButtonState();
         return;
       }
 
       let bestIdx = -1, bestSim = -1;
       enrolled.forEach(({ m, idx }) => {
-        // Combine raw L2 similarity and illumination-normalized similarity so classroom lighting shifts don't block enrolled students
         const rawSim = cosineSimilarity(sample.vector, m.faceDescriptor);
         const zSim = cosineSimilarity(sample.zVector, normalizeVectorZeroMean(m.faceDescriptor));
         let sim = Math.max(rawSim, (rawSim * 0.55 + ((zSim + 1) / 2) * 0.45));
@@ -817,12 +871,16 @@ function upgradeAdvancedFaceSystem() {
         if (sim > bestSim) { bestSim = sim; bestIdx = idx; }
       });
 
-      // Calibrated confidence percentage (0.78 raw threshold maps cleanly to 90%+ confidence when aligned)
       const calibratedPct = bestSim >= 0.78
         ? Math.min(99.4, 90 + ((bestSim - 0.78) / 0.22) * 9.4).toFixed(2)
         : Math.max(0, (bestSim / 0.78) * 89.9).toFixed(2);
 
-      const isAlignedAndMatched = sample.qualityOk && sample.isLive && bestSim >= 0.78 && bestIdx !== -1;
+      // If signed in as a student, verify the matched face belongs to the logged-in student
+      const loggedInStudent = getEligibleSessionStudent();
+      const matchedCandidate = bestIdx !== -1 ? state.members[bestIdx] : null;
+      const wrongStudentDetected = Boolean(loggedInStudent && matchedCandidate && bestSim >= 0.78 && matchedCandidate.id !== loggedInStudent.id);
+
+      const isAlignedAndMatched = sample.qualityOk && sample.isLive && bestSim >= 0.78 && bestIdx !== -1 && !wrongStudentDetected;
 
       if (isAlignedAndMatched) faceAlignmentState.streak = Math.min(5, faceAlignmentState.streak + 1);
       else faceAlignmentState.streak = 0;
@@ -837,10 +895,10 @@ function upgradeAdvancedFaceSystem() {
         reticle.classList.add('matched');
         label.textContent = `ALIGNED: ${matched.id} (${calibratedPct}%)`;
         banner.classList.add('verified');
-        banner.textContent = `✅ ALIGNED & MATCHED: ${matched.name} (${calibratedPct}%) | Live:${sample.livenessScore}%`;
+        banner.textContent = `✅ VERIFIED REGISTERED STUDENT: ${matched.name} (${calibratedPct}%) | Live:${sample.livenessScore}%`;
 
         const mSel = document.getElementById('live-member-select');
-        if (mSel && mSel.value !== String(bestIdx)) {
+        if (mSel && !mSel.disabled && mSel.value !== String(bestIdx)) {
           mSel.value = String(bestIdx);
           renderLiveAttendanceUI();
         }
@@ -862,7 +920,9 @@ function upgradeAdvancedFaceSystem() {
         matchedMemberIndex = null;
         matchedConfidence = 0;
         faceAlignmentState.aligned = false;
-        faceAlignmentState.reason = !sample.qualityOk
+        faceAlignmentState.reason = wrongStudentDetected
+          ? `Wrong Student (${matchedCandidate.id})`
+          : !sample.qualityOk
           ? sample.alignReason
           : !sample.isLive
           ? 'Blink / Move Slightly'
@@ -871,7 +931,9 @@ function upgradeAdvancedFaceSystem() {
         reticle.classList.remove('matched');
         label.textContent = faceAlignmentState.reason.toUpperCase();
         banner.classList.remove('verified');
-        banner.textContent = `🎯 ${faceAlignmentState.reason} | Light: ${sample.brightness}%`;
+        banner.textContent = wrongStudentDetected
+          ? `🚫 Identity Mismatch: Signed in as ${loggedInStudent.name}, but camera sees ${matchedCandidate.name}!`
+          : `🎯 ${faceAlignmentState.reason} | Light: ${sample.brightness}%`;
       }
 
       syncVerifyButtonState();
@@ -879,6 +941,11 @@ function upgradeAdvancedFaceSystem() {
   };
 
   window.verifyLiveFaceAttendance = function () {
+    if (!state.session) {
+      showToast('🚫 Sign in with a registered student account first.');
+      return;
+    }
+
     evaluateCollegeSchedule();
     if (!collegeScheduleState.allowed) {
       showToast(`🚫 Attendance Locked: ${collegeScheduleState.statusText}`);
@@ -894,7 +961,15 @@ function upgradeAdvancedFaceSystem() {
     }
 
     const m = state.members[matchedMemberIndex];
-    if (!m || !m.faceRegistered) return;
+    if (!m || m.status !== 'approved' || !m.faceRegistered) {
+      showToast('🚫 Only HOD-approved students with an enrolled Face ID can mark attendance.');
+      return;
+    }
+
+    if (state.session.role === 'student' && m.id !== state.session.memberId) {
+      showToast(`🚫 Security Lock: Signed in as ${state.session.memberId}; cannot mark attendance for ${m.id}.`);
+      return;
+    }
 
     const sIdx = Number(document.getElementById('live-subject-select').value);
     const s = m.subjects[sIdx];
@@ -915,11 +990,11 @@ function upgradeAdvancedFaceSystem() {
       studentName: m.name,
       studentId: m.id,
       subject: `${pTag} • ${s.code}`,
-      confidence: `${matchedConfidence}% Aligned • ${distTag}`
+      confidence: `${matchedConfidence}% Verified Student • ${distTag}`
     });
     window.saveState(state);
     renderLiveAttendanceUI();
-    recordTamperProofEvent(m.id, `KIPM_ATTENDANCE:${pTag}:${s.code}:${matchedConfidence}%:${distTag}`);
+    recordTamperProofEvent(m.id, `REGISTERED_STUDENT_ATTENDANCE:${pTag}:${s.code}:${matchedConfidence}%:${distTag}`);
   };
 }
 
