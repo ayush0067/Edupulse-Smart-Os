@@ -259,7 +259,6 @@ function renderLiveAttendanceUI() {
 
   if (rc) rc.textContent = state.members.length;
 
-  // Highlight "Register Face ID" as primary CTA if student hasn't enrolled their Face ID yet
   if (regBtn && verifyBtn && loggedInStudent) {
     if (!loggedInStudent.faceRegistered) {
       regBtn.className = 'btn-primary';
