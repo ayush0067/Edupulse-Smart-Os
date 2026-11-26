@@ -1,12 +1,9 @@
-﻿                               // js/auth.js
-
-let authCamStream = null;
+﻿let authCamStream = null;
 let signupFaceData = null;
 let facultyFaceData = null;
 let faceLoginTimer = null;
 let editingRollId = null;
 
-// Stores only SHA-256 hashes of dispatched OTPs — never exposes plaintext OTP on screen
 const otpSessions = {
   reg: { hash: null, mobile: null, verified: false, timer: null },
   fac: { hash: null, mobile: null, verified: false, timer: null },
@@ -83,7 +80,6 @@ function getOtpBoxesValue(containerId) {
   return Array.from(container.querySelectorAll('.otp-box')).map(b => b.value).join('');
 }
 
-// ================= REAL LIVE OTP DISPATCHER (REAL PHONE PUSH + REAL EMAILJS + REAL PYTHON SMS) =================
 async function dispatchRealLiveOtp({ flowKey, targetId, mobile, email, purposeLabel, boxesContainerId, timerElId, hintElId, onAutoVerify }) {
   const cleanMobile = mobile.replace(/\D/g, '');
   if (cleanMobile.length !== 10) {
@@ -91,7 +87,6 @@ async function dispatchRealLiveOtp({ flowKey, targetId, mobile, email, purposeLa
     return false;
   }
 
-  // Generate Cryptographically Secure 6-Digit OTP
   let otpCode = String(Math.floor(100000 + Math.random() * 900000));
   if (window.crypto && window.crypto.getRandomValues) {
     const arr = new Uint32Array(1);
@@ -102,7 +97,6 @@ async function dispatchRealLiveOtp({ flowKey, targetId, mobile, email, purposeLa
   const otpHash = await hashPassword(`${cleanMobile}:${otpCode}`);
   const deliveredChannels = [];
 
-  // Channel 1: REAL SMARTPHONE PUSH NOTIFICATION (ntfy.sh -> rings real Android/iOS phone)
   const phoneTopic = `edupulse-otp-${cleanMobile}`;
   try {
     const pushRes = await fetch(`https://ntfy.sh/${phoneTopic}`, {
@@ -113,7 +107,6 @@ async function dispatchRealLiveOtp({ flowKey, targetId, mobile, email, purposeLa
     if (pushRes.ok) deliveredChannels.push(`Phone Push (${phoneTopic})`);
   } catch {}
 
-  // Channel 2: REAL EMAIL OTP via EmailJS (if configured by Admin/HOD)
   const ejs = state.emailjsConfig || {};
   if (ejs.publicKey && ejs.serviceId && ejs.templateId && email) {
     try {
@@ -131,7 +124,6 @@ async function dispatchRealLiveOtp({ flowKey, targetId, mobile, email, purposeLa
     } catch {}
   }
 
-  // Channel 3: REAL PYTHON BACKEND (Fast2SMS Cellular SMS + Gmail SMTP + SQLite3 Audit Log)
   try {
     const pyRes = await fetch('/api/send-sms-otp', {
       method: 'POST',
@@ -162,7 +154,6 @@ async function dispatchRealLiveOtp({ flowKey, targetId, mobile, email, purposeLa
     }
   });
 
-  // 60-Second Security Expiry Countdown
   let secondsLeft = 60;
   const timerEl = document.getElementById(timerElId);
   if (timerEl) timerEl.textContent = '60s';
@@ -177,11 +168,10 @@ async function dispatchRealLiveOtp({ flowKey, targetId, mobile, email, purposeLa
     }
   }, 1000);
 
-  // Show Real Phone Pairing Guidance (NEVER prints the OTP code on screen!)
   const hintEl = document.getElementById(hintElId);
   if (hintEl) {
     const via = deliveredChannels.length ? deliveredChannels.join(' + ') : 'Phone Push Channel';
-    hintEl.innerHTML = `✅ <strong>Dispatched live</strong> via ${via}.<br/>📱 <strong>Receive on your phone:</strong> Open the free <em>ntfy</em> app (or mobile browser) at <a href="https://ntfy.sh/${phoneTopic}" target="_blank" style="color:var(--cyan);">ntfy.sh/${phoneTopic}</a> on your phone.`;
+    hintEl.innerHTML = `✅ <strong>Dispatched live</strong> via ${via}.<br/>📱 <strong>Receive on your phone:</strong> Open <em>ntfy</em> or visit <a href="https://ntfy.sh/${phoneTopic}" target="_blank" style="color:var(--cyan);">ntfy.sh/${phoneTopic}</a>.`;
   }
 
   return true;
@@ -383,7 +373,7 @@ function setupAuthUI() {
       activateAuthSubTab('student-login', document.getElementById('student-gate-container'));
       document.getElementById('login-roll-id').value = savedId;
     }
-    setAuthAlert('success', `✅ Password updated on Live Database for ${acc.name} (${savedId})!`);
+    setAuthAlert('success', `✅ Password updated on Firebase Live Database for ${acc.name} (${savedId})!`);
   });
 
   // Student Registration Real Phone OTP Dispatch
@@ -444,13 +434,13 @@ function setupAuthUI() {
   document.getElementById('student-login-form').addEventListener('submit', async e => {
     e.preventDefault();
     if (!state.members.length) {
-      setAuthAlert('warning', 'No students are registered yet. Switch to "📝 New Student Register" to create the first student account.');
+      setAuthAlert('warning', 'No students are registered yet. Switch to "📝 New Student Register" to create your account.');
       return;
     }
     const rollId = document.getElementById('login-roll-id').value.trim().toUpperCase();
     const pass = document.getElementById('login-password').value;
     const idx = state.members.findIndex(m => m.id.toUpperCase() === rollId);
-    if (idx === -1) { setAuthAlert('error', `Roll ID "${rollId}" not found.`); return; }
+    if (idx === -1) { setAuthAlert('error', `Roll ID "${rollId}" not found in Firebase Database.`); return; }
     const member = state.members[idx];
     if ((await hashPassword(pass)) !== member.passwordHash) { setAuthAlert('error', 'Incorrect password.'); return; }
     if (member.status === 'pending') { setAuthAlert('warning', `⏳ Account Pending Admin / HOD Approval for ${member.name} (${member.id}).`); return; }
@@ -462,7 +452,7 @@ function setupAuthUI() {
     checkSessionAndRender();
   });
 
-  // Student Self-Registration Submit
+  // Student Self-Registration Submit -> Direct Atomic Save to Firebase Realtime Database
   document.getElementById('student-register-form').addEventListener('submit', async e => {
     e.preventDefault();
     const name = document.getElementById('reg-name').value.trim();
@@ -471,28 +461,59 @@ function setupAuthUI() {
     const mobile = document.getElementById('reg-mobile').value.trim().replace(/\D/g, '');
     const year = document.getElementById('reg-year').value;
     const pass = document.getElementById('reg-password').value;
+    const submitBtn = e.target.querySelector('button[type="submit"]');
 
     if (!otpSessions.reg.verified || otpSessions.reg.mobile !== mobile) {
       setAuthAlert('error', '📲 Please click "Send Live OTP" and enter the 6-digit code sent to your phone.');
       return;
     }
     if (state.members.some(m => m.id.toUpperCase() === rollId)) {
-      setAuthAlert('error', `Roll ID ${rollId} is already registered.`);
+      setAuthAlert('error', `Roll ID ${rollId} is already registered in Firebase Database.`);
       return;
     }
 
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = '☁️ Saving Student to Firebase Realtime DB...';
+    }
+
     const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    state.members.push({
-      name, id: rollId, email, mobile, mobileVerified: true, year, initials, passwordHash: await hashPassword(pass), status: 'pending',
+    const newStudent = {
+      name,
+      id: rollId,
+      email,
+      mobile,
+      mobileVerified: true,
+      year,
+      initials,
+      passwordHash: await hashPassword(pass),
+      status: 'pending',
       registeredAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      streak: 1, xp: 100, faceRegistered: Boolean(signupFaceData),
+      registeredIso: new Date().toISOString(),
+      streak: 1,
+      xp: 100,
+      faceRegistered: Boolean(signupFaceData),
       facePhoto: signupFaceData ? signupFaceData.thumbnail : null,
       faceDescriptor: signupFaceData ? signupFaceData.vector : null,
-      performanceHistory: [0, 0, 0, 0, 0, 0], subjects: createBTechSubjects()
-    });
-    logActivity(`Live Student Registration: ${name} (${rollId}) — Awaiting HOD Approval`, 'Live Reg');
+      performanceHistory: [0, 0, 0, 0, 0, 0],
+      subjects: createBTechSubjects()
+    };
+
+    state.members.push(newStudent);
+    logActivity(`Live Student Registration: ${name} (${rollId}) — Saved to Firebase & Awaiting HOD Approval`, 'Firebase Reg');
     window.saveState(state);
+
+    let savedToFirebase = false;
+    if (typeof window.saveStudentRecordToFirebase === 'function') {
+      savedToFirebase = await window.saveStudentRecordToFirebase(newStudent);
+    }
+
     updatePendingBadges();
+
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Submit Live Registration for HOD Approval ✓';
+    }
 
     e.target.reset();
     signupFaceData = null;
@@ -504,7 +525,13 @@ function setupAuthUI() {
     stopAuthCamera();
     activateAuthSubTab('student-login', document.getElementById('student-gate-container'));
     document.getElementById('login-roll-id').value = rollId;
-    setAuthAlert('warning', `✅ Registered ${name} (${rollId}) live! Waiting for HOD / Coordinator Approval before sign-in.`);
+
+    setAuthAlert(
+      'warning',
+      savedToFirebase
+        ? `🔥 Saved ${name} (${rollId}) directly to Firebase Realtime Database! Waiting for HOD / Coordinator Approval before sign-in.`
+        : `✅ Registered ${name} (${rollId})! Connect Firebase URL in HOD Portal to sync across all devices.`
+    );
   });
 
   // Student Face Capture on Register
@@ -652,8 +679,8 @@ function setupAuthUI() {
     activateAuthSubTab('coordinator-login', document.getElementById('faculty-gate-container'));
     document.getElementById('coord-id').value = facId;
     setAuthAlert(autoApproved ? 'success' : 'warning', autoApproved
-      ? `✅ ${name} (${facId}) verified via Real Phone OTP, Photo & Auth Key! Sign in now.`
-      : `⏳ ${name} (${facId}) registered! Sign in as HOD-ADMIN to verify & approve.`);
+      ? `✅ ${name} (${facId}) verified & saved to Firebase! Sign in now.`
+      : `⏳ ${name} (${facId}) registered in Firebase! Sign in as HOD-ADMIN to verify & approve.`);
   });
 
   document.getElementById('faculty-face-login-btn').addEventListener('click', startFacultyFaceSignIn);
@@ -756,7 +783,7 @@ function updatePendingBadges() {
   });
 
   const countEl = document.getElementById('auth-student-count');
-  if (countEl) countEl.textContent = `${state.members.length} Student${state.members.length === 1 ? '' : 's'} Registered`;
+  if (countEl) countEl.textContent = `${state.members.length} Student${state.members.length === 1 ? '' : 's'} in Firebase DB`;
 }
 
 function scrollToHodSection(sectionId) {
@@ -792,7 +819,7 @@ function checkSessionAndRender() {
     document.getElementById('nav-coordinator-btn').classList.add('active');
     document.getElementById('view-coordinator').classList.add('active');
     document.getElementById('page-title').textContent = 'Admin, HOD & Coordinator Governance Portal';
-    document.getElementById('page-subtitle').textContent = 'Real-Time Approvals, Live Cloud DB & Biometric Audit';
+    document.getElementById('page-subtitle').textContent = 'Real-Time Approvals, Firebase Live DB & Biometric Audit';
   } else {
     const idx = state.members.findIndex(m => m.id === state.session.memberId);
     if (idx === -1) {
@@ -948,7 +975,7 @@ function approveAllPending() {
   pF.forEach(c => { c.status = 'approved'; });
   window.saveState(state);
   renderAll();
-  showToast(`✅ Approved all ${pS.length + pF.length} pending accounts live!`);
+  showToast(`✅ Approved all ${pS.length + pF.length} pending accounts on Firebase!`);
 }
 
 function startEditMember(rollId) { editingRollId = rollId; renderCoordinatorPortal(); }
@@ -966,8 +993,9 @@ function saveEditedMember(oldRollId) {
   m.initials = m.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   editingRollId = null;
   window.saveState(state);
+  if (typeof window.saveStudentRecordToFirebase === 'function') window.saveStudentRecordToFirebase(m);
   renderAll();
-  showToast(`💾 Updated ${m.name} on Live Database!`);
+  showToast(`💾 Updated ${m.name} on Firebase Live Database!`);
 }
 
 function deleteMemberRecord(rollId) {
@@ -977,8 +1005,9 @@ function deleteMemberRecord(rollId) {
   state.members.splice(idx, 1);
   if (state.activeMemberIndex >= state.members.length) state.activeMemberIndex = 0;
   window.saveState(state);
+  if (typeof window.deleteStudentRecordFromFirebase === 'function') window.deleteStudentRecordFromFirebase(rollId);
   renderAll();
-  showToast(`🗑️ Removed ${removed.name} from Live Database.`);
+  showToast(`🗑️ Removed ${removed.name} from Firebase Live Database.`);
 }
 
 function setMemberApproval(rollId, status) {
@@ -986,6 +1015,7 @@ function setMemberApproval(rollId, status) {
   if (!m) return;
   m.status = status;
   window.saveState(state);
+  if (typeof window.saveStudentRecordToFirebase === 'function') window.saveStudentRecordToFirebase(m);
   renderAll();
-  showToast(`✅ ${m.name} (${m.id}) set to ${status.toUpperCase()}!`);
+  showToast(`✅ ${m.name} (${m.id}) set to ${status.toUpperCase()} on Firebase!`);
 }

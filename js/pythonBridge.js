@@ -58,6 +58,7 @@ const CREDITS_MAP = { 'BCS-301': 4, 'BCS-302': 4, 'BCS-303': 4, 'BAS-303': 4, 'B
 
 document.addEventListener('DOMContentLoaded', async () => {
   applyUrlCloudParams();
+  await autoDetectFirebaseUrl();
   await checkPythonBackend();
   await initRealTimeDatabaseSync();
   initCollegeScheduleLock();
@@ -410,7 +411,7 @@ function syncVerifyButtonState() {
   verifyBtn.textContent = `✅ Mark Present (${pTag}) — ${matched.name} (${matchedConfidence}%)`;
 }
 
-// ================= 1. REAL-TIME LIVE CLOUD & FIREBASE SYNC =================
+// ================= 1. ATOMIC PER-STUDENT FIREBASE REALTIME DB SYNC =================
 function applyUrlCloudParams() {
   const params = new URLSearchParams(window.location.search);
   const fb = params.get('fb'), room = params.get('room');
@@ -422,14 +423,86 @@ function applyUrlCloudParams() {
   if (changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+// Auto-connect to edupulse-live Firebase Realtime DB if opened without ?fb= parameter
+async function autoDetectFirebaseUrl() {
+  if (state.firebaseUrl) return;
+  const candidates = [
+    'https://edupulse-live-default-rtdb.asia-southeast1.firebasedatabase.app',
+    'https://edupulse-live-default-rtdb.firebaseio.com'
+  ];
+  for (const url of candidates) {
+    try {
+      const res = await fetch(`${url}/edupulse_live.json?shallow=true`);
+      if (res.ok) {
+        state.firebaseUrl = url;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        return;
+      }
+    } catch {}
+  }
+}
+
+function sanitizeFirebaseKey(rawKey) {
+  return String(rawKey || 'UNKNOWN').trim().replace(/[.#$\[\]\/]/g, '_');
+}
+
+// Atomic Per-Student Save directly to /edupulse_live/students/<ROLL_ID>.json
+window.saveStudentRecordToFirebase = async function (studentObj) {
+  if (!state.firebaseUrl || !studentObj || !studentObj.id) return false;
+  const safeId = sanitizeFirebaseKey(studentObj.id);
+  try {
+    const res = await fetch(`${state.firebaseUrl}/edupulse_live/students/${encodeURIComponent(safeId)}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(studentObj)
+    });
+    if (res.ok) {
+      await fetch(`${state.firebaseUrl}/edupulse_live/updatedAt.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Date.now())
+      });
+      updateCloudStatusBadges();
+      return true;
+    }
+  } catch {}
+  return false;
+};
+
+window.deleteStudentRecordFromFirebase = async function (rollId) {
+  if (!state.firebaseUrl || !rollId) return false;
+  const safeId = sanitizeFirebaseKey(rollId);
+  try {
+    await fetch(`${state.firebaseUrl}/edupulse_live/students/${encodeURIComponent(safeId)}.json`, { method: 'DELETE' });
+    await fetch(`${state.firebaseUrl}/edupulse_live/updatedAt.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Date.now())
+    });
+    updateCloudStatusBadges();
+    return true;
+  } catch {}
+  return false;
+};
+
 function buildSyncPayload(fullState) {
+  const studentsMap = {};
+  (fullState.members || []).forEach(m => {
+    if (m && m.id) studentsMap[sanitizeFirebaseKey(m.id)] = m;
+  });
+
+  const coordinatorsMap = {};
+  (fullState.coordinators || []).forEach(c => {
+    if (c && c.id) coordinatorsMap[sanitizeFirebaseKey(c.id)] = c;
+  });
+
   return {
     updatedAt: fullState.updatedAt || Date.now(),
     syncRoom: fullState.syncRoom,
     firebaseUrl: fullState.firebaseUrl || '',
     coordinatorHash: fullState.coordinatorHash,
-    coordinators: fullState.coordinators || [],
-    members: fullState.members || [],
+    students: studentsMap,
+    coordinators: coordinatorsMap,
     liveLogs: (fullState.liveLogs || []).slice(0, 50),
     activities: (fullState.activities || []).slice(0, 20)
   };
@@ -462,7 +535,7 @@ async function initRealTimeDatabaseSync() {
     updateCloudStatusBadges();
     connectCloudLiveStream(state.syncRoom);
     await pullFromFirebase();
-    showToast('☁️ Live Cloud DB & Email OTP Configuration Saved!');
+    showToast('☁️ Firebase Realtime Database & OTP Gateway Saved!');
   });
 
   document.getElementById('copy-live-student-link-btn')?.addEventListener('click', () => {
@@ -476,21 +549,25 @@ async function initRealTimeDatabaseSync() {
       qs.set('et', state.emailjsConfig.templateId);
     }
     navigator.clipboard?.writeText(`${base}?${qs.toString()}`);
-    showToast('🔗 Live Student Registration Link copied!');
+    showToast('🔗 Live Firebase Student Registration Link copied!');
   });
 
   document.getElementById('wipe-all-students-btn')?.addEventListener('click', async () => {
-    if (!confirm('Remove all registered students and reset to 0 on Live Database?')) return;
+    if (!confirm('Remove all registered students and reset to 0 on Firebase Live Database?')) return;
     state.members = []; state.liveLogs = []; state.activeMemberIndex = 0;
-    state.activities = [{ text: 'HOD cleared database — 0 students registered', time: 'Just now', tag: 'System' }];
-    window.saveState(state); renderAll();
-    showToast('🗑️ Student registry reset to 0 on Live DB.');
+    state.activities = [{ text: 'HOD cleared Firebase database — 0 students registered', time: 'Just now', tag: 'System' }];
+    window.saveState(state);
+    if (state.firebaseUrl) {
+      try { await fetch(`${state.firebaseUrl}/edupulse_live/students.json`, { method: 'DELETE' }); } catch {}
+    }
+    renderAll();
+    showToast('🗑️ Student registry reset to 0 on Firebase DB.');
   });
 
   document.getElementById('force-sync-now-btn')?.addEventListener('click', async () => {
     await broadcastAndPushState(state);
-    await pullFromFirebase();
-    showToast('🔄 Live Database synchronized!');
+    await pullFromFirebase(true);
+    showToast('🔄 Firebase Live Database synchronized!');
   });
 
   if ('BroadcastChannel' in window) {
@@ -506,9 +583,10 @@ async function initRealTimeDatabaseSync() {
     }
   });
 
-  await pullFromFirebase();
+  // Initial pull from Firebase (force=true so existing Firebase registrations load immediately on fresh devices)
+  await pullFromFirebase(true);
   setInterval(async () => {
-    if (state.firebaseUrl) await pullFromFirebase();
+    if (state.firebaseUrl) await pullFromFirebase(false);
     if (pythonOnline) {
       try {
         const r = await fetch('/api/state');
@@ -524,9 +602,10 @@ async function initRealTimeDatabaseSync() {
 function updateCloudStatusBadges() {
   const pill = document.getElementById('cloud-conn-pill');
   const authBadge = document.getElementById('auth-db-badge');
+  const count = state.members.length;
   if (state.firebaseUrl) {
-    if (pill) { pill.className = 'badge badge-green'; pill.textContent = '🔥 Firebase Live Cloud Connected'; }
-    if (authBadge) authBadge.textContent = '🔥 Firebase Live DB Connected';
+    if (pill) { pill.className = 'badge badge-green'; pill.textContent = `🔥 Firebase Connected (${count} Students)`; }
+    if (authBadge) authBadge.textContent = '🔥 Firebase Realtime DB Connected';
   } else if (pythonOnline) {
     if (pill) { pill.className = 'badge badge-cyan'; pill.textContent = '🐍 Python SQLite3 + Relay'; }
     if (authBadge) authBadge.textContent = '🐍 Python Live DB Active';
@@ -536,13 +615,39 @@ function updateCloudStatusBadges() {
   }
 }
 
-async function pullFromFirebase() {
+async function pullFromFirebase(forceMerge = false) {
   if (!state.firebaseUrl) return;
   try {
     const res = await fetch(`${state.firebaseUrl}/edupulse_live.json`);
     if (!res.ok) return;
     const remote = await res.json();
-    if (remote && remote.updatedAt) applyIncomingLiveState(remote, 'Firebase Realtime DB');
+    if (!remote) return;
+
+    // Normalize both keyed object map (remote.students) and legacy array (remote.members)
+    let remoteMembers = [];
+    if (remote.students && typeof remote.students === 'object') {
+      remoteMembers = Object.values(remote.students).filter(Boolean);
+    } else if (Array.isArray(remote.members)) {
+      remoteMembers = remote.members;
+    }
+
+    let remoteCoords = [];
+    if (remote.coordinators && typeof remote.coordinators === 'object' && !Array.isArray(remote.coordinators)) {
+      remoteCoords = Object.values(remote.coordinators).filter(Boolean);
+    } else if (Array.isArray(remote.coordinators)) {
+      remoteCoords = remote.coordinators;
+    }
+
+    if (forceMerge || (remote.updatedAt || 0) > (state.updatedAt || 0) || remoteMembers.length !== state.members.length) {
+      applyIncomingLiveState({
+        updatedAt: Math.max(remote.updatedAt || Date.now(), state.updatedAt || 0),
+        members: remoteMembers,
+        coordinators: remoteCoords.length ? remoteCoords : state.coordinators,
+        liveLogs: Array.isArray(remote.liveLogs) ? remote.liveLogs : state.liveLogs,
+        activities: Array.isArray(remote.activities) ? remote.activities : state.activities,
+        coordinatorHash: remote.coordinatorHash || state.coordinatorHash
+      }, 'Firebase Realtime DB', forceMerge);
+    }
   } catch {}
 }
 
@@ -553,19 +658,29 @@ function connectCloudLiveStream(roomName) {
     cloudEventSource.onmessage = ev => {
       try {
         const wrapper = JSON.parse(ev.data);
-        if (wrapper.message) applyIncomingLiveState(JSON.parse(wrapper.message), 'Live Cloud Stream');
+        if (wrapper.message) {
+          const msgObj = JSON.parse(wrapper.message);
+          if (msgObj.students && !Array.isArray(msgObj.members)) {
+            msgObj.members = Object.values(msgObj.students);
+          }
+          if (msgObj.coordinators && !Array.isArray(msgObj.coordinators)) {
+            msgObj.coordinators = Object.values(msgObj.coordinators);
+          }
+          applyIncomingLiveState(msgObj, 'Live Cloud Stream');
+        }
       } catch {}
     };
   } catch {}
 }
 
-function applyIncomingLiveState(incoming, sourceLabel) {
+function applyIncomingLiveState(incoming, sourceLabel, forceApply = false) {
   if (!incoming || !Array.isArray(incoming.members)) return;
-  if ((incoming.updatedAt || 0) <= (state.updatedAt || 0)) return;
+  if (!forceApply && (incoming.updatedAt || 0) <= (state.updatedAt || 0) && incoming.members.length === state.members.length) return;
+
   const prevPending = state.members.filter(m => m.status === 'pending').length;
   const newPending = incoming.members.filter(m => m.status === 'pending').length;
 
-  state.updatedAt = incoming.updatedAt;
+  state.updatedAt = Math.max(incoming.updatedAt || 0, state.updatedAt || 0);
   state.members = incoming.members;
   if (Array.isArray(incoming.coordinators) && incoming.coordinators.length) state.coordinators = incoming.coordinators;
   if (Array.isArray(incoming.liveLogs)) state.liveLogs = incoming.liveLogs;
@@ -574,9 +689,10 @@ function applyIncomingLiveState(incoming, sourceLabel) {
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   updatePendingBadges();
+  updateCloudStatusBadges();
   if (state.session) renderAll();
   if (newPending > prevPending && state.session?.role === 'coordinator') {
-    showToast(`🔔 New Live Student Registration received via ${sourceLabel}!`);
+    showToast(`🔔 New Student Registration saved in ${sourceLabel}!`);
   }
   const tsEl = document.getElementById('live-sync-timestamp');
   if (tsEl) tsEl.textContent = `Live update synced via ${sourceLabel} at ${new Date().toLocaleTimeString()}`;
@@ -586,17 +702,35 @@ async function broadcastAndPushState(currentState) {
   const payload = buildSyncPayload(currentState);
   if (liveSyncChannel) liveSyncChannel.postMessage({ type: 'STATE_SYNC', payload });
   if (pythonOnline) await syncToPythonSQLite(currentState);
+
   if (currentState.firebaseUrl) {
     try {
       await fetch(`${currentState.firebaseUrl}/edupulse_live.json`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
+      updateCloudStatusBadges();
     } catch {}
   }
+
   try {
-    const compact = structuredClone(payload);
-    compact.members.forEach(m => { delete m.facePhoto; delete m.faceDescriptor; delete m.faceTemplates; });
-    compact.coordinators.forEach(c => { delete c.facePhoto; delete c.faceDescriptor; });
+    const compact = {
+      updatedAt: payload.updatedAt,
+      syncRoom: payload.syncRoom,
+      members: (currentState.members || []).map(m => {
+        const copy = { ...m };
+        delete copy.facePhoto; delete copy.faceDescriptor; delete copy.faceTemplates;
+        return copy;
+      }),
+      coordinators: (currentState.coordinators || []).map(c => {
+        const copy = { ...c };
+        delete copy.facePhoto; delete copy.faceDescriptor;
+        return copy;
+      }),
+      liveLogs: payload.liveLogs,
+      activities: payload.activities
+    };
     const serialized = JSON.stringify(compact);
     if (serialized.length < 3900) {
       await fetch(`https://ntfy.sh/${encodeURIComponent(currentState.syncRoom || 'edupulse-live-ayush0067')}`, { method: 'POST', body: serialized });
@@ -783,7 +917,6 @@ function upgradeAdvancedFaceSystem() {
     const label = document.getElementById('reticle-label');
     if (!liveStream || video.readyState < 2) { showToast('Start camera first!'); return; }
 
-    // Students can only register Face ID for their own logged-in account
     const idx = state.session?.role === 'student'
       ? state.members.findIndex(x => x.id === state.session.memberId)
       : Number(document.getElementById('live-member-select').value);
@@ -821,9 +954,10 @@ function upgradeAdvancedFaceSystem() {
     state.activeMemberIndex = idx;
     logActivity(`Enrolled 3-Pose Biometric Face ID for ${m.name} (+60 XP)`, '3-Pose Face ID');
     window.saveState(state);
+    await window.saveStudentRecordToFirebase(m);
     renderAll();
     regBtn.disabled = false;
-    showToast(`🪪 3-Pose Face ID Enrolled for ${m.name}!`);
+    showToast(`🪪 3-Pose Face ID Enrolled & Saved to Firebase for ${m.name}!`);
   };
 
   window.startContinuousFaceScan = function () {
@@ -837,7 +971,6 @@ function upgradeAdvancedFaceSystem() {
       if (!liveStream || video.readyState < 2) return;
       const sample = window.extractFaceDescriptor(video);
 
-      // ONLY consider HOD-approved & biometrically registered students
       const enrolled = state.members
         .map((m, idx) => ({ m, idx }))
         .filter(x => x.m.status === 'approved' && x.m.faceRegistered && x.m.faceDescriptor && x.m.faceDescriptor.length === sample.vector.length);
@@ -875,7 +1008,6 @@ function upgradeAdvancedFaceSystem() {
         ? Math.min(99.4, 90 + ((bestSim - 0.78) / 0.22) * 9.4).toFixed(2)
         : Math.max(0, (bestSim / 0.78) * 89.9).toFixed(2);
 
-      // If signed in as a student, verify the matched face belongs to the logged-in student
       const loggedInStudent = getEligibleSessionStudent();
       const matchedCandidate = bestIdx !== -1 ? state.members[bestIdx] : null;
       const wrongStudentDetected = Boolean(loggedInStudent && matchedCandidate && bestSim >= 0.78 && matchedCandidate.id !== loggedInStudent.id);
@@ -940,7 +1072,7 @@ function upgradeAdvancedFaceSystem() {
     }, 400);
   };
 
-  window.verifyLiveFaceAttendance = function () {
+  window.verifyLiveFaceAttendance = async function () {
     if (!state.session) {
       showToast('🚫 Sign in with a registered student account first.');
       return;
@@ -993,6 +1125,7 @@ function upgradeAdvancedFaceSystem() {
       confidence: `${matchedConfidence}% Verified Student • ${distTag}`
     });
     window.saveState(state);
+    await window.saveStudentRecordToFirebase(m);
     renderLiveAttendanceUI();
     recordTamperProofEvent(m.id, `REGISTERED_STUDENT_ATTENDANCE:${pTag}:${s.code}:${matchedConfidence}%:${distTag}`);
   };
@@ -1102,7 +1235,7 @@ function injectPythonWidgets() {
     pill.id = 'python-status-pill';
     pill.className = 'badge badge-cyan';
     pill.style.padding = '7px 12px';
-    pill.textContent = pythonOnline ? '🐍 Python + SQLite3' : '☁️ Live Cloud DB';
+    pill.textContent = pythonOnline ? '🐍 Python + SQLite3' : '🔥 Firebase Live DB';
     topbar.prepend(pill);
   }
 
