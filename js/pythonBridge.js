@@ -31,6 +31,7 @@ const LUNCH_WINDOW = { startMin: 12 * 60 + 50, endMin: 13 * 60 + 50 };
 const collegeScheduleState = {
   allowed: false,
   isLunch: false,
+  demoOverride: false,
   activePeriod: null,
   minsLeft: 0,
   statusText: 'Checking college hours...',
@@ -78,9 +79,7 @@ window.syncLiveSubjectToCurrentPeriod = function () {
   const period = collegeScheduleState.activePeriod;
   if (!sSel || !period) return;
   const opt = sSel.querySelector(`option[value="${period.subjectIdx}"]`);
-  if (opt && !opt.disabled) {
-    sSel.value = String(period.subjectIdx);
-  }
+  if (opt && !opt.disabled) sSel.value = String(period.subjectIdx);
 };
 
 function evaluateCollegeSchedule() {
@@ -89,11 +88,16 @@ function evaluateCollegeSchedule() {
 
   if (totalMins >= LUNCH_WINDOW.startMin && totalMins < LUNCH_WINDOW.endMin) {
     const left = LUNCH_WINDOW.endMin - totalMins;
-    collegeScheduleState.allowed = false;
     collegeScheduleState.isLunch = true;
     collegeScheduleState.activePeriod = null;
     collegeScheduleState.minsLeft = left;
-    collegeScheduleState.statusText = `🍽️ Lunch Break (12:50 – 1:50 PM) • Resumes in ${left}m`;
+    if (collegeScheduleState.demoOverride) {
+      collegeScheduleState.allowed = true;
+      collegeScheduleState.statusText = `🔓 Viva Override Active (Lunch Window • ${left}m left)`;
+    } else {
+      collegeScheduleState.allowed = false;
+      collegeScheduleState.statusText = `🍽️ Lunch Break (12:50 – 1:50 PM) • Resumes in ${left}m`;
+    }
     return;
   }
 
@@ -113,13 +117,18 @@ function evaluateCollegeSchedule() {
     return;
   }
 
-  collegeScheduleState.allowed = false;
   collegeScheduleState.isLunch = false;
   collegeScheduleState.activePeriod = null;
   collegeScheduleState.minsLeft = 0;
-  collegeScheduleState.statusText = totalMins < 9 * 60 + 30
-    ? '🔒 Before College Hours • Opens at 9:30 AM (Period 1)'
-    : '🔒 After College Hours (Closed 4:20 PM) • Opens 9:30 AM';
+  if (collegeScheduleState.demoOverride) {
+    collegeScheduleState.allowed = true;
+    collegeScheduleState.statusText = '🔓 Viva Override Active (Outside 9:30 AM – 4:20 PM)';
+  } else {
+    collegeScheduleState.allowed = false;
+    collegeScheduleState.statusText = totalMins < 9 * 60 + 30
+      ? '🔒 Before College Hours • Opens at 9:30 AM (Period 1)'
+      : '🔒 After College Hours (Closed 4:20 PM) • Opens 9:30 AM';
+  }
 }
 
 function initCollegeScheduleLock() {
@@ -144,11 +153,19 @@ function injectScheduleHUD() {
     hud.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
         <strong id="schedule-status-text" style="color:var(--cyan);">Checking College Timetable...</strong>
-        <span style="font-size:0.72rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">9:30 AM–4:20 PM • 50m/Period • Lunch 12:50–1:50 PM</span>
+        <button type="button" id="toggle-viva-schedule-btn" class="btn-outline" style="padding:3px 9px;font-size:0.7rem;">🔓 Viva Time Override</button>
       </div>
       <div id="schedule-period-pills" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;"></div>
     `;
     liveCard.appendChild(hud);
+
+    document.getElementById('toggle-viva-schedule-btn').addEventListener('click', () => {
+      collegeScheduleState.demoOverride = !collegeScheduleState.demoOverride;
+      evaluateCollegeSchedule();
+      updateScheduleUI();
+      syncVerifyButtonState();
+      showToast(collegeScheduleState.demoOverride ? '🔓 Viva Schedule Override Enabled' : '🔒 Strict 9:30 AM–4:20 PM Timetable Restored');
+    });
   }
 
   const attToolbar = document.querySelector('#view-attendance .section-toolbar');
@@ -376,7 +393,7 @@ function syncVerifyButtonState() {
     }
     if (!self.faceRegistered) {
       verifyBtn.disabled = true;
-      verifyBtn.textContent = '🪪 Click "Register Face ID" First';
+      verifyBtn.textContent = '🪪 Click "Step 1: Register Face ID"';
       return;
     }
   }
@@ -452,6 +469,13 @@ function sanitizeFirebaseKey(rawKey) {
   return String(rawKey || 'UNKNOWN').trim().replace(/[.#$\[\]\/]/g, '_');
 }
 
+function purgeOrphanedLogsInPlace() {
+  const validIds = new Set((state.members || []).map(m => m.id));
+  const beforeCount = (state.liveLogs || []).length;
+  state.liveLogs = (state.liveLogs || []).filter(l => validIds.has(l.studentId));
+  return state.liveLogs.length !== beforeCount;
+}
+
 window.saveStudentRecordToFirebase = async function (studentObj) {
   if (!state.firebaseUrl || !studentObj || !studentObj.id) return false;
   const safeId = sanitizeFirebaseKey(studentObj.id);
@@ -479,6 +503,16 @@ window.deleteStudentRecordFromFirebase = async function (rollId) {
   const safeId = sanitizeFirebaseKey(rollId);
   try {
     await fetch(`${state.firebaseUrl}/edupulse_live/students/${encodeURIComponent(safeId)}.json`, { method: 'DELETE' });
+    const cleanLogs = (state.liveLogs || []).filter(l => l.studentId !== rollId);
+    if (!cleanLogs.length) {
+      await fetch(`${state.firebaseUrl}/edupulse_live/liveLogs.json`, { method: 'DELETE' });
+    } else {
+      await fetch(`${state.firebaseUrl}/edupulse_live/liveLogs.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cleanLogs)
+      });
+    }
     await fetch(`${state.firebaseUrl}/edupulse_live/updatedAt.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -576,6 +610,7 @@ async function initRealTimeDatabaseSync() {
   });
 
   document.getElementById('force-sync-now-btn')?.addEventListener('click', async () => {
+    purgeOrphanedLogsInPlace();
     await broadcastAndPushState(state);
     await pullFromFirebase(true);
     showToast('🔄 Firebase Live Database synchronized!');
@@ -593,6 +628,11 @@ async function initRealTimeDatabaseSync() {
       try { applyIncomingLiveState(JSON.parse(e.newValue), 'Local DB'); } catch {}
     }
   });
+
+  // Immediately purge any stale logs left over from deleted accounts and sync clean state
+  if (purgeOrphanedLogsInPlace()) {
+    window.saveState(state);
+  }
 
   await pullFromFirebase(true);
   setInterval(async () => {
@@ -647,12 +687,30 @@ async function pullFromFirebase(forceMerge = false) {
       remoteCoords = remote.coordinators;
     }
 
+    const validIds = new Set(remoteMembers.map(m => m.id));
+    const remoteLogs = Array.isArray(remote.liveLogs)
+      ? remote.liveLogs.filter(l => l && validIds.has(l.studentId))
+      : [];
+
+    // If Firebase still has orphaned logs for deleted students, delete them from Firebase permanently
+    if (Array.isArray(remote.liveLogs) && remote.liveLogs.length !== remoteLogs.length) {
+      if (!remoteLogs.length) {
+        fetch(`${state.firebaseUrl}/edupulse_live/liveLogs.json`, { method: 'DELETE' }).catch(() => {});
+      } else {
+        fetch(`${state.firebaseUrl}/edupulse_live/liveLogs.json`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(remoteLogs)
+        }).catch(() => {});
+      }
+    }
+
     if (forceMerge || (remote.updatedAt || 0) > (state.updatedAt || 0) || remoteMembers.length !== state.members.length) {
       applyIncomingLiveState({
         updatedAt: Math.max(remote.updatedAt || Date.now(), state.updatedAt || 0),
         members: remoteMembers,
         coordinators: remoteCoords.length ? remoteCoords : state.coordinators,
-        liveLogs: Array.isArray(remote.liveLogs) ? remote.liveLogs : state.liveLogs,
+        liveLogs: remoteLogs,
         activities: Array.isArray(remote.activities) ? remote.activities : state.activities,
         coordinatorHash: remote.coordinatorHash || state.coordinatorHash
       }, 'Firebase Realtime DB', forceMerge);
@@ -689,6 +747,7 @@ function applyIncomingLiveState(incoming, sourceLabel, forceApply = false) {
   state.members = incoming.members;
   if (Array.isArray(incoming.coordinators) && incoming.coordinators.length) state.coordinators = incoming.coordinators;
   if (Array.isArray(incoming.liveLogs)) state.liveLogs = incoming.liveLogs;
+  purgeOrphanedLogsInPlace();
   if (Array.isArray(incoming.activities)) state.activities = incoming.activities;
   if (incoming.coordinatorHash) state.coordinatorHash = incoming.coordinatorHash;
 
@@ -704,6 +763,7 @@ function applyIncomingLiveState(incoming, sourceLabel, forceApply = false) {
 }
 
 async function broadcastAndPushState(currentState) {
+  purgeOrphanedLogsInPlace();
   const payload = buildSyncPayload(currentState);
   if (liveSyncChannel) liveSyncChannel.postMessage({ type: 'STATE_SYNC', payload });
   if (pythonOnline) await syncToPythonSQLite(currentState);
@@ -715,6 +775,9 @@ async function broadcastAndPushState(currentState) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      if (!payload.liveLogs.length) {
+        await fetch(`${currentState.firebaseUrl}/edupulse_live/liveLogs.json`, { method: 'DELETE' });
+      }
       updateCloudStatusBadges();
     } catch {}
   }
@@ -831,7 +894,6 @@ function upgradeAdvancedFaceSystem() {
     syncVerifyButtonState();
   };
 
-  // Backlight-Resistant Contrast-Normalized 392-D Descriptor
   window.extractFaceDescriptor = function (videoEl) {
     const canvas = document.getElementById('face-process-canvas');
     const ctx = canvas.getContext('2d');
@@ -859,7 +921,6 @@ function upgradeAdvancedFaceSystem() {
       }
     }
 
-    // Contrast-stretch luminance inside the face box so ceiling backlighting doesn't darken facial features
     const sortedLums = [...rawLums].sort((a, b) => a - b);
     const lowClip = sortedLums[Math.floor(sortedLums.length * 0.06)];
     const highClip = sortedLums[Math.floor(sortedLums.length * 0.94)];
@@ -994,7 +1055,6 @@ function upgradeAdvancedFaceSystem() {
       const sample = window.extractFaceDescriptor(video);
       const loggedInStudent = getEligibleSessionStudent();
 
-      // Clear guidance if logged-in student hasn't enrolled Face ID yet
       if (loggedInStudent && !loggedInStudent.faceRegistered) {
         matchedMemberIndex = null;
         faceAlignmentState.aligned = false;
@@ -1043,13 +1103,13 @@ function upgradeAdvancedFaceSystem() {
         if (sim > bestSim) { bestSim = sim; bestIdx = idx; }
       });
 
-      const calibratedPct = bestSim >= 0.78
-        ? Math.min(99.4, 90 + ((bestSim - 0.78) / 0.22) * 9.4).toFixed(2)
-        : Math.max(0, (bestSim / 0.78) * 89.9).toFixed(2);
+      const calibratedPct = bestSim >= 0.76
+        ? Math.min(99.4, 90 + ((bestSim - 0.76) / 0.24) * 9.4).toFixed(2)
+        : Math.max(0, (bestSim / 0.76) * 89.9).toFixed(2);
 
       const matchedCandidate = bestIdx !== -1 ? state.members[bestIdx] : null;
-      const wrongStudentDetected = Boolean(loggedInStudent && matchedCandidate && bestSim >= 0.78 && matchedCandidate.id !== loggedInStudent.id);
-      const isAlignedAndMatched = sample.qualityOk && sample.isLive && bestSim >= 0.78 && bestIdx !== -1 && !wrongStudentDetected;
+      const wrongStudentDetected = Boolean(loggedInStudent && matchedCandidate && bestSim >= 0.76 && matchedCandidate.id !== loggedInStudent.id);
+      const isAlignedAndMatched = sample.qualityOk && sample.isLive && bestSim >= 0.76 && bestIdx !== -1 && !wrongStudentDetected;
 
       if (isAlignedAndMatched) faceAlignmentState.streak = Math.min(5, faceAlignmentState.streak + 1);
       else faceAlignmentState.streak = 0;

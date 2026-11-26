@@ -364,6 +364,7 @@ function setupAuthUI() {
     if (isFac && acc.id === 'HOD-ADMIN') state.coordinatorHash = acc.passwordHash;
     logActivity(`Password reset via Live Phone OTP for ${acc.name} (${acc.id})`, 'Security');
     window.saveState(state);
+    if (!isFac && typeof window.saveStudentRecordToFirebase === 'function') await window.saveStudentRecordToFirebase(acc);
 
     const savedId = acc.id;
     e.target.reset();
@@ -376,7 +377,6 @@ function setupAuthUI() {
     setAuthAlert('success', `✅ Password updated on Firebase Live Database for ${acc.name} (${savedId})!`);
   });
 
-  // Student Registration Real Phone OTP Dispatch
   document.getElementById('reg-send-otp-btn').addEventListener('click', async () => {
     const mobile = document.getElementById('reg-mobile').value.trim();
     const email = document.getElementById('reg-email').value.trim();
@@ -403,7 +403,6 @@ function setupAuthUI() {
     }
   });
 
-  // Admin / HOD Registration Real Phone OTP Dispatch
   document.getElementById('fac-send-otp-btn').addEventListener('click', async () => {
     const mobile = document.getElementById('fac-reg-mobile').value.trim();
     const email = document.getElementById('fac-reg-email').value.trim();
@@ -430,7 +429,6 @@ function setupAuthUI() {
     }
   });
 
-  // Student Sign In
   document.getElementById('student-login-form').addEventListener('submit', async e => {
     e.preventDefault();
     if (!state.members.length) {
@@ -452,7 +450,6 @@ function setupAuthUI() {
     checkSessionAndRender();
   });
 
-  // Student Self-Registration Submit -> Direct Atomic Save to Firebase Realtime Database
   document.getElementById('student-register-form').addEventListener('submit', async e => {
     e.preventDefault();
     const name = document.getElementById('reg-name').value.trim();
@@ -534,7 +531,6 @@ function setupAuthUI() {
     );
   });
 
-  // Student Face Capture on Register
   document.getElementById('reg-capture-face-btn').addEventListener('click', async () => {
     const video = document.getElementById('reg-video');
     const preview = document.getElementById('reg-face-preview');
@@ -557,7 +553,6 @@ function setupAuthUI() {
     }
   });
 
-  // Admin / HOD Sign In
   document.getElementById('coordinator-login-form').addEventListener('submit', async e => {
     e.preventDefault();
     const id = document.getElementById('coord-id').value.trim().toUpperCase();
@@ -581,7 +576,6 @@ function setupAuthUI() {
     checkSessionAndRender();
   });
 
-  // Admin / HOD Live Webcam Capture
   document.getElementById('fac-cam-capture-btn').addEventListener('click', async () => {
     const video = document.getElementById('fac-reg-video');
     const preview = document.getElementById('fac-reg-preview');
@@ -609,7 +603,6 @@ function setupAuthUI() {
     }
   });
 
-  // Admin / HOD Photo Upload
   document.getElementById('fac-photo-upload').addEventListener('change', e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -629,7 +622,6 @@ function setupAuthUI() {
     reader.readAsDataURL(file);
   });
 
-  // Admin / HOD Registration Submit
   document.getElementById('coordinator-register-form').addEventListener('submit', async e => {
     e.preventDefault();
     const name = document.getElementById('fac-reg-name').value.trim();
@@ -921,10 +913,11 @@ function renderCoordinatorPortal() {
   }
 
   const auditBody = document.getElementById('hod-live-audit-body');
+  const validLogs = typeof getValidSessionLogs === 'function' ? getValidSessionLogs() : (state.liveLogs || []);
   if (auditBody) {
-    auditBody.innerHTML = !state.liveLogs?.length
-      ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No live biometric scans recorded yet.</td></tr>`
-      : getValidSessionLogs().slice(0, 8).map(l => `<tr><td>${l.time}</td><td><strong>${l.studentName}</strong> (${l.studentId})</td><td>${l.subject}</td><td><span class="badge badge-green">${l.confidence}</span></td></tr>`).join('');
+    auditBody.innerHTML = !validLogs.length
+      ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No live biometric check-ins recorded yet.</td></tr>`
+      : validLogs.slice(0, 8).map(l => `<tr><td>${l.time}</td><td><strong>${l.studentName}</strong> (${l.studentId})</td><td>${l.subject}</td><td><span class="badge badge-green">${l.confidence}</span></td></tr>`).join('');
   }
 
   const searchQuery = (document.getElementById('hod-search-input')?.value || '').trim().toLowerCase();
@@ -998,16 +991,18 @@ function saveEditedMember(oldRollId) {
   showToast(`💾 Updated ${m.name} on Firebase Live Database!`);
 }
 
-function deleteMemberRecord(rollId) {
+async function deleteMemberRecord(rollId) {
   const idx = state.members.findIndex(x => x.id === rollId);
   if (idx === -1) return;
   const removed = state.members[idx];
   state.members.splice(idx, 1);
+  // Permanently purge all session logs belonging to the deleted student
+  state.liveLogs = (state.liveLogs || []).filter(l => l.studentId !== rollId);
   if (state.activeMemberIndex >= state.members.length) state.activeMemberIndex = 0;
   window.saveState(state);
-  if (typeof window.deleteStudentRecordFromFirebase === 'function') window.deleteStudentRecordFromFirebase(rollId);
+  if (typeof window.deleteStudentRecordFromFirebase === 'function') await window.deleteStudentRecordFromFirebase(rollId);
   renderAll();
-  showToast(`🗑️ Removed ${removed.name} from Firebase Live Database.`);
+  showToast(`🗑️ Permanently removed ${removed.name} and their logs from Firebase.`);
 }
 
 function setMemberApproval(rollId, status) {
