@@ -73,18 +73,25 @@ function setupControls() {
     const year = document.getElementById('new-member-year').value;
     if (!name || !id) return;
     const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    state.members.push({
+    const newStu = {
       name, id, mobile, mobileVerified: true, year, initials, passwordHash: await hashPassword('pass123'), status: 'approved',
       streak: 1, xp: 100, faceRegistered: false, facePhoto: null, faceDescriptor: null,
       performanceHistory: [0, 0, 0, 0, 0, 0], subjects: createBTechSubjects()
-    });
+    };
+    state.members.push(newStu);
     state.activeMemberIndex = state.members.length - 1;
     e.target.reset();
     e.target.style.display = 'none';
     window.saveState(state);
+    if (typeof window.saveStudentRecordToFirebase === 'function') await window.saveStudentRecordToFirebase(newStu);
     renderAll();
     showToast(`Added ${name} (${id})`);
   });
+}
+
+function getValidSessionLogs() {
+  const validIds = new Set((state.members || []).map(m => m.id));
+  return (state.liveLogs || []).filter(l => validIds.has(l.studentId));
 }
 
 function renderAll() {
@@ -200,7 +207,6 @@ function markAttendanceForMember(mIdx, sIdx, isPresent, viaFace = false) {
   const m = state.members[mIdx];
   if (!m) return false;
 
-  // Strict Registered Student Verification Checks
   if (state.session.role === 'student' && m.id !== state.session.memberId) {
     showToast('🚫 Security Lock: You can only mark attendance for your own registered account.');
     return false;
@@ -243,6 +249,8 @@ function renderLiveAttendanceUI() {
   const rc = document.getElementById('roster-count');
   const rb = document.getElementById('members-roster-body');
   const lb = document.getElementById('live-log-body');
+  const regBtn = document.getElementById('register-face-btn');
+  const verifyBtn = document.getElementById('verify-live-btn');
 
   const isStudentSession = state.session?.role === 'student';
   const loggedInStudent = isStudentSession
@@ -251,13 +259,26 @@ function renderLiveAttendanceUI() {
 
   if (rc) rc.textContent = state.members.length;
 
+  // Highlight "Register Face ID" as primary CTA if student hasn't enrolled their Face ID yet
+  if (regBtn && verifyBtn && loggedInStudent) {
+    if (!loggedInStudent.faceRegistered) {
+      regBtn.className = 'btn-primary';
+      regBtn.textContent = '🪪 Step 1: Register Face ID Now';
+      verifyBtn.className = 'btn-outline';
+    } else {
+      regBtn.className = 'btn-outline';
+      regBtn.textContent = '🪪 Re-Enroll Face ID';
+      verifyBtn.className = 'btn-primary';
+    }
+  }
+
   if (!state.members.length) {
     if (mSel) { mSel.innerHTML = `<option value="">No students registered yet</option>`; mSel.disabled = true; }
     if (sSel) sSel.innerHTML = `<option value="">Register a student first</option>`;
     if (rb) rb.innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);text-align:center;">No students registered yet.</td></tr>`;
   } else if (isStudentSession && loggedInStudent) {
-    // Lock selector exclusively to the signed-in registered student
     const myIdx = state.members.findIndex(m => m.id === loggedInStudent.id);
+    const prevSub = sSel?.value;
     if (mSel) {
       mSel.innerHTML = `<option value="${myIdx}">${loggedInStudent.name} (${loggedInStudent.id}) — Verified Session</option>`;
       mSel.value = String(myIdx);
@@ -265,6 +286,8 @@ function renderLiveAttendanceUI() {
     }
     if (sSel) {
       sSel.innerHTML = loggedInStudent.subjects.map((s, i) => `<option value="${i}" ${s.todayStatus ? 'disabled' : ''}>${s.code} — ${s.name}${s.todayStatus ? ' [🔒 Locked]' : ''}</option>`).join('');
+      if (prevSub && sSel.querySelector(`option[value="${prevSub}"]:not(:disabled)`)) sSel.value = prevSub;
+      if (typeof window.syncLiveSubjectToCurrentPeriod === 'function') window.syncLiveSubjectToCurrentPeriod();
     }
     if (rb) {
       rb.innerHTML = state.members.map(m => {
@@ -275,7 +298,7 @@ function renderLiveAttendanceUI() {
       }).join('');
     }
   } else {
-    // HOD / Coordinator Classroom Scanner Mode
+    const prevSub = sSel?.value;
     if (mSel) {
       const prev = mSel.value;
       mSel.disabled = false;
@@ -285,6 +308,8 @@ function renderLiveAttendanceUI() {
     const tm = state.members[Number(mSel?.value || state.activeMemberIndex)] || getActiveMember(state);
     if (sSel && tm) {
       sSel.innerHTML = tm.subjects.map((s, i) => `<option value="${i}" ${s.todayStatus ? 'disabled' : ''}>${s.code} — ${s.name}${s.todayStatus ? ' [🔒 Locked]' : ''}</option>`).join('');
+      if (prevSub && sSel.querySelector(`option[value="${prevSub}"]:not(:disabled)`)) sSel.value = prevSub;
+      if (typeof window.syncLiveSubjectToCurrentPeriod === 'function') window.syncLiveSubjectToCurrentPeriod();
     }
     if (rb) {
       rb.innerHTML = state.members.map((m, i) => {
@@ -295,10 +320,11 @@ function renderLiveAttendanceUI() {
     }
   }
 
+  const validLogs = getValidSessionLogs();
   if (lb) {
-    lb.innerHTML = !state.liveLogs.length
-      ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No check-ins yet.</td></tr>`
-      : state.liveLogs.map(l => `<tr><td>${l.time}</td><td><strong>${l.studentName}</strong></td><td>${l.subject}</td><td><span class="badge badge-green">🔒 ${l.confidence}</span></td></tr>`).join('');
+    lb.innerHTML = !validLogs.length
+      ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No check-ins recorded yet.</td></tr>`
+      : validLogs.map(l => `<tr><td>${l.time}</td><td><strong>${l.studentName}</strong></td><td>${l.subject}</td><td><span class="badge badge-green">🔒 ${l.confidence}</span></td></tr>`).join('');
   }
 }
 
@@ -370,7 +396,8 @@ function registerMemberFace() {}
 function verifyLiveFaceAttendance() {}
 
 function exportHODReportCSV() {
-  const rows = [['Date', 'Time', 'Name', 'ID', 'Subject', 'Status'], ...state.liveLogs.map(l => [l.date, l.time, l.studentName, l.studentId, l.subject, 'LOCKED'])];
+  const validLogs = getValidSessionLogs();
+  const rows = [['Date', 'Time', 'Name', 'ID', 'Subject', 'Status'], ...validLogs.map(l => [l.date, l.time, l.studentName, l.studentId, l.subject, 'LOCKED'])];
   const blob = new Blob([rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'HOD_Report.csv'; a.click();
 }

@@ -924,7 +924,7 @@ function renderCoordinatorPortal() {
   if (auditBody) {
     auditBody.innerHTML = !state.liveLogs?.length
       ? `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No live biometric scans recorded yet.</td></tr>`
-      : state.liveLogs.slice(0, 8).map(l => `<tr><td>${l.time}</td><td><strong>${l.studentName}</strong> (${l.studentId})</td><td>${l.subject}</td><td><span class="badge badge-green">${l.confidence}</span></td></tr>`).join('');
+      : getValidSessionLogs().slice(0, 8).map(l => `<tr><td>${l.time}</td><td><strong>${l.studentName}</strong> (${l.studentId})</td><td>${l.subject}</td><td><span class="badge badge-green">${l.confidence}</span></td></tr>`).join('');
   }
 
   const searchQuery = (document.getElementById('hod-search-input')?.value || '').trim().toLowerCase();

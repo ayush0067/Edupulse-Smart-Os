@@ -73,6 +73,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ================= 0A. COLLEGE TIMETABLE ENGINE (9:30 AM - 4:20 PM | 50-MIN PERIODS) =================
+window.syncLiveSubjectToCurrentPeriod = function () {
+  const sSel = document.getElementById('live-subject-select');
+  const period = collegeScheduleState.activePeriod;
+  if (!sSel || !period) return;
+  const opt = sSel.querySelector(`option[value="${period.subjectIdx}"]`);
+  if (opt && !opt.disabled) {
+    sSel.value = String(period.subjectIdx);
+  }
+};
+
 function evaluateCollegeSchedule() {
   const now = new Date();
   const totalMins = now.getHours() * 60 + now.getMinutes();
@@ -96,13 +106,9 @@ function evaluateCollegeSchedule() {
     collegeScheduleState.minsLeft = left;
     collegeScheduleState.statusText = `🕒 ${period.label} Active (${period.timeText}) • ${left}m left`;
 
-    const sSel = document.getElementById('live-subject-select');
-    if (sSel && collegeScheduleState.lastAutoSelectedPeriodId !== period.id) {
-      const opt = sSel.querySelector(`option[value="${period.subjectIdx}"]`);
-      if (opt && !opt.disabled) {
-        sSel.value = String(period.subjectIdx);
-        collegeScheduleState.lastAutoSelectedPeriodId = period.id;
-      }
+    if (collegeScheduleState.lastAutoSelectedPeriodId !== period.id) {
+      window.syncLiveSubjectToCurrentPeriod();
+      collegeScheduleState.lastAutoSelectedPeriodId = period.id;
     }
     return;
   }
@@ -120,6 +126,7 @@ function initCollegeScheduleLock() {
   injectScheduleHUD();
   evaluateCollegeSchedule();
   updateScheduleUI();
+  window.syncLiveSubjectToCurrentPeriod();
 
   setInterval(() => {
     evaluateCollegeSchedule();
@@ -369,7 +376,7 @@ function syncVerifyButtonState() {
     }
     if (!self.faceRegistered) {
       verifyBtn.disabled = true;
-      verifyBtn.textContent = '🪪 Register Your Face ID First';
+      verifyBtn.textContent = '🪪 Click "Register Face ID" First';
       return;
     }
   }
@@ -423,7 +430,6 @@ function applyUrlCloudParams() {
   if (changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-// Auto-connect to edupulse-live Firebase Realtime DB if opened without ?fb= parameter
 async function autoDetectFirebaseUrl() {
   if (state.firebaseUrl) return;
   const candidates = [
@@ -446,7 +452,6 @@ function sanitizeFirebaseKey(rawKey) {
   return String(rawKey || 'UNKNOWN').trim().replace(/[.#$\[\]\/]/g, '_');
 }
 
-// Atomic Per-Student Save directly to /edupulse_live/students/<ROLL_ID>.json
 window.saveStudentRecordToFirebase = async function (studentObj) {
   if (!state.firebaseUrl || !studentObj || !studentObj.id) return false;
   const safeId = sanitizeFirebaseKey(studentObj.id);
@@ -486,6 +491,9 @@ window.deleteStudentRecordFromFirebase = async function (rollId) {
 };
 
 function buildSyncPayload(fullState) {
+  const validIds = new Set((fullState.members || []).map(m => m.id));
+  const cleanLogs = (fullState.liveLogs || []).filter(l => validIds.has(l.studentId)).slice(0, 50);
+
   const studentsMap = {};
   (fullState.members || []).forEach(m => {
     if (m && m.id) studentsMap[sanitizeFirebaseKey(m.id)] = m;
@@ -503,7 +511,7 @@ function buildSyncPayload(fullState) {
     coordinatorHash: fullState.coordinatorHash,
     students: studentsMap,
     coordinators: coordinatorsMap,
-    liveLogs: (fullState.liveLogs || []).slice(0, 50),
+    liveLogs: cleanLogs,
     activities: (fullState.activities || []).slice(0, 20)
   };
 }
@@ -534,7 +542,7 @@ async function initRealTimeDatabaseSync() {
     window.saveState(state);
     updateCloudStatusBadges();
     connectCloudLiveStream(state.syncRoom);
-    await pullFromFirebase();
+    await pullFromFirebase(true);
     showToast('☁️ Firebase Realtime Database & OTP Gateway Saved!');
   });
 
@@ -558,7 +566,10 @@ async function initRealTimeDatabaseSync() {
     state.activities = [{ text: 'HOD cleared Firebase database — 0 students registered', time: 'Just now', tag: 'System' }];
     window.saveState(state);
     if (state.firebaseUrl) {
-      try { await fetch(`${state.firebaseUrl}/edupulse_live/students.json`, { method: 'DELETE' }); } catch {}
+      try {
+        await fetch(`${state.firebaseUrl}/edupulse_live/students.json`, { method: 'DELETE' });
+        await fetch(`${state.firebaseUrl}/edupulse_live/liveLogs.json`, { method: 'DELETE' });
+      } catch {}
     }
     renderAll();
     showToast('🗑️ Student registry reset to 0 on Firebase DB.');
@@ -583,7 +594,6 @@ async function initRealTimeDatabaseSync() {
     }
   });
 
-  // Initial pull from Firebase (force=true so existing Firebase registrations load immediately on fresh devices)
   await pullFromFirebase(true);
   setInterval(async () => {
     if (state.firebaseUrl) await pullFromFirebase(false);
@@ -623,7 +633,6 @@ async function pullFromFirebase(forceMerge = false) {
     const remote = await res.json();
     if (!remote) return;
 
-    // Normalize both keyed object map (remote.students) and legacy array (remote.members)
     let remoteMembers = [];
     if (remote.students && typeof remote.students === 'object') {
       remoteMembers = Object.values(remote.students).filter(Boolean);
@@ -660,12 +669,8 @@ function connectCloudLiveStream(roomName) {
         const wrapper = JSON.parse(ev.data);
         if (wrapper.message) {
           const msgObj = JSON.parse(wrapper.message);
-          if (msgObj.students && !Array.isArray(msgObj.members)) {
-            msgObj.members = Object.values(msgObj.students);
-          }
-          if (msgObj.coordinators && !Array.isArray(msgObj.coordinators)) {
-            msgObj.coordinators = Object.values(msgObj.coordinators);
-          }
+          if (msgObj.students && !Array.isArray(msgObj.members)) msgObj.members = Object.values(msgObj.students);
+          if (msgObj.coordinators && !Array.isArray(msgObj.coordinators)) msgObj.coordinators = Object.values(msgObj.coordinators);
           applyIncomingLiveState(msgObj, 'Live Cloud Stream');
         }
       } catch {}
@@ -774,7 +779,7 @@ async function recordTamperProofEvent(rollId, action) {
   } catch {}
 }
 
-// ================= 2. REGISTERED-STUDENT ONLY + 392-D FACE ALIGNMENT & TRIPLE-GATE GUARD =================
+// ================= 2. BACKLIGHT-NORMALIZED 392-D FACE ALIGNMENT & TRIPLE-GATE GUARD =================
 function normalizeVectorZeroMean(arr) {
   const mean = arr.reduce((s, v) => s + v, 0) / (arr.length || 1);
   const centered = arr.map(v => v - mean);
@@ -826,6 +831,7 @@ function upgradeAdvancedFaceSystem() {
     syncVerifyButtonState();
   };
 
+  // Backlight-Resistant Contrast-Normalized 392-D Descriptor
   window.extractFaceDescriptor = function (videoEl) {
     const canvas = document.getElementById('face-process-canvas');
     const ctx = canvas.getContext('2d');
@@ -834,9 +840,8 @@ function upgradeAdvancedFaceSystem() {
     ctx.drawImage(videoEl, (vw - size) / 2, (vh - size) / 2, size, size, 0, 0, 140, 140);
     const imgData = ctx.getImageData(0, 0, 140, 140).data;
 
-    const rawDesc = [], lumaGrid = [], coreLums = [];
-    let totalLum = 0, edgeContrastSum = 0;
-    let weightedX = 0, weightedY = 0, totalEdgeWeight = 0;
+    const rawLums = [], rawRgs = [];
+    let totalLum = 0;
 
     for (let by = 0; by < 14; by++) {
       for (let bx = 0; bx < 14; bx++) {
@@ -848,13 +853,30 @@ function upgradeAdvancedFaceSystem() {
           }
         }
         const lum = (0.299 * r + 0.587 * g + 0.114 * b) / (c * 255);
-        rawDesc.push(lum, (r - g) / (c * 255));
-        lumaGrid.push(lum);
+        rawLums.push(lum);
+        rawRgs.push((r - g) / (c * 255));
         totalLum += lum;
-        if (by >= 3 && by <= 10 && bx >= 3 && bx <= 10) coreLums.push(lum);
       }
     }
 
+    // Contrast-stretch luminance inside the face box so ceiling backlighting doesn't darken facial features
+    const sortedLums = [...rawLums].sort((a, b) => a - b);
+    const lowClip = sortedLums[Math.floor(sortedLums.length * 0.06)];
+    const highClip = sortedLums[Math.floor(sortedLums.length * 0.94)];
+    const dynamicRange = Math.max(0.16, highClip - lowClip);
+
+    const lumaGrid = rawLums.map(v => Math.min(1, Math.max(0, (v - lowClip) / dynamicRange)));
+    const rawDesc = [];
+    const coreLums = [];
+
+    for (let i = 0; i < lumaGrid.length; i++) {
+      rawDesc.push(lumaGrid[i], rawRgs[i]);
+      const by = Math.floor(i / 14);
+      const bx = i % 14;
+      if (by >= 3 && by <= 10 && bx >= 3 && bx <= 10) coreLums.push(lumaGrid[i]);
+    }
+
+    let edgeContrastSum = 0, weightedX = 0, weightedY = 0, totalEdgeWeight = 0;
     for (let by = 1; by < 13; by++) {
       for (let bx = 1; bx < 13; bx++) {
         const cur = lumaGrid[by * 14 + bx];
@@ -866,19 +888,19 @@ function upgradeAdvancedFaceSystem() {
       }
     }
 
-    const avgBrightness = (totalLum / lumaGrid.length) * 100;
-    const sharpnessScore = Math.min(99, Math.round((edgeContrastSum / 144) * 520));
+    const avgBrightness = (totalLum / rawLums.length) * 100;
+    const sharpnessScore = Math.min(99, Math.round((edgeContrastSum / 144) * 420));
     const coreMean = coreLums.reduce((s, v) => s + v, 0) / coreLums.length;
     const coreStd = Math.sqrt(coreLums.reduce((s, v) => s + (v - coreMean) ** 2, 0) / coreLums.length);
     const cx = totalEdgeWeight > 0 ? (weightedX / totalEdgeWeight) / 13 : 0.5;
     const cy = totalEdgeWeight > 0 ? (weightedY / totalEdgeWeight) / 13 : 0.5;
 
-    const centeredOk = cx >= 0.28 && cx <= 0.72 && cy >= 0.25 && cy <= 0.75;
-    const featureRich = coreStd >= 0.045 && sharpnessScore >= 15;
-    const lightingOk = avgBrightness >= 14 && avgBrightness <= 94;
+    const centeredOk = cx >= 0.25 && cx <= 0.75 && cy >= 0.22 && cy <= 0.78;
+    const featureRich = coreStd >= 0.04 && sharpnessScore >= 14 && (highClip - lowClip) >= 0.09;
+    const lightingOk = avgBrightness >= 10 && avgBrightness <= 95;
 
     let alignReason = 'Aligned ✓';
-    if (!lightingOk) alignReason = avgBrightness < 14 ? 'Too Dark — Face Light' : 'Too Bright — Reduce Glare';
+    if (!lightingOk) alignReason = avgBrightness < 10 ? 'Too Dark — Face Light' : 'Too Bright — Reduce Glare';
     else if (!featureRich) alignReason = 'Move Closer Inside Box';
     else if (!centeredOk) alignReason = 'Center Face Inside Box';
 
@@ -889,7 +911,7 @@ function upgradeAdvancedFaceSystem() {
       motionDelta = diffSum / lumaGrid.length;
     }
     prevFrameLuma = lumaGrid;
-    liveHumanConfirmed = motionDelta > 0.0006;
+    liveHumanConfirmed = motionDelta > 0.0005;
 
     const norm = Math.sqrt(rawDesc.reduce((s, v) => s + v * v, 0)) || 1;
     const l2Vec = rawDesc.map(v => v / norm);
@@ -903,7 +925,7 @@ function upgradeAdvancedFaceSystem() {
       sharpness: sharpnessScore,
       qualityOk: lightingOk && featureRich && centeredOk,
       alignReason,
-      livenessScore: Math.min(99.8, Math.max(50, motionDelta * 4500)).toFixed(1),
+      livenessScore: Math.min(99.8, Math.max(55, motionDelta * 4500)).toFixed(1),
       isLive: liveHumanConfirmed
     };
   };
@@ -939,7 +961,7 @@ function upgradeAdvancedFaceSystem() {
       label.textContent = poses[p];
       banner.classList.add('verified');
       banner.textContent = `🪪 Enrolling ${m.name} — ${poses[p]}...`;
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, 450));
       const snap = window.extractFaceDescriptor(video);
       capturedVectors.push(snap.vector);
       if (p === 0) bestThumb = snap.thumbnail;
@@ -957,7 +979,7 @@ function upgradeAdvancedFaceSystem() {
     await window.saveStudentRecordToFirebase(m);
     renderAll();
     regBtn.disabled = false;
-    showToast(`🪪 3-Pose Face ID Enrolled & Saved to Firebase for ${m.name}!`);
+    showToast(`🪪 Face ID Enrolled & Saved to Firebase for ${m.name}!`);
   };
 
   window.startContinuousFaceScan = function () {
@@ -970,6 +992,23 @@ function upgradeAdvancedFaceSystem() {
     faceScanTimer = setInterval(() => {
       if (!liveStream || video.readyState < 2) return;
       const sample = window.extractFaceDescriptor(video);
+      const loggedInStudent = getEligibleSessionStudent();
+
+      // Clear guidance if logged-in student hasn't enrolled Face ID yet
+      if (loggedInStudent && !loggedInStudent.faceRegistered) {
+        matchedMemberIndex = null;
+        faceAlignmentState.aligned = false;
+        faceAlignmentState.streak = 0;
+        faceAlignmentState.reason = 'Enroll Face ID First';
+        reticle.classList.toggle('matched', sample.qualityOk);
+        label.textContent = sample.qualityOk ? 'READY — CLICK REGISTER FACE ID' : sample.alignReason.toUpperCase();
+        banner.classList.remove('verified');
+        banner.textContent = sample.qualityOk
+          ? `🪪 Face Aligned! Click "🪪 Step 1: Register Face ID Now" below to enroll ${loggedInStudent.name}.`
+          : `🎯 ${sample.alignReason} — Center your face, then click "🪪 Step 1: Register Face ID Now".`;
+        syncVerifyButtonState();
+        return;
+      }
 
       const enrolled = state.members
         .map((m, idx) => ({ m, idx }))
@@ -1008,10 +1047,8 @@ function upgradeAdvancedFaceSystem() {
         ? Math.min(99.4, 90 + ((bestSim - 0.78) / 0.22) * 9.4).toFixed(2)
         : Math.max(0, (bestSim / 0.78) * 89.9).toFixed(2);
 
-      const loggedInStudent = getEligibleSessionStudent();
       const matchedCandidate = bestIdx !== -1 ? state.members[bestIdx] : null;
       const wrongStudentDetected = Boolean(loggedInStudent && matchedCandidate && bestSim >= 0.78 && matchedCandidate.id !== loggedInStudent.id);
-
       const isAlignedAndMatched = sample.qualityOk && sample.isLive && bestSim >= 0.78 && bestIdx !== -1 && !wrongStudentDetected;
 
       if (isAlignedAndMatched) faceAlignmentState.streak = Math.min(5, faceAlignmentState.streak + 1);
